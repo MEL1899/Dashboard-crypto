@@ -6,6 +6,7 @@ import { useWallet } from "./hooks/useWallet";
 import { useDerivatives } from "./hooks/useDerivatives";
 import { loadSettings, saveSettings } from "./lib/settings";
 import { MarketOverview } from "./components/MarketOverview";
+import { MarketWatchlist } from "./components/MarketWatchlist";
 import { TokenSelector } from "./components/TokenSelector";
 import { SettingsModal } from "./components/SettingsModal";
 import { Spinner } from "./components/common";
@@ -179,6 +180,11 @@ function App() {
                     />
                   </Suspense>
                 </div>
+                <MarketWatchlist
+                  tokens={market.tokens}
+                  selectedId={tokenId}
+                  onSelect={handleTokenSelect}
+                />
               </>
             )}
           </div>
