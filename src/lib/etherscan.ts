@@ -154,7 +154,6 @@ export async function loadWalletSnapshot(
       direction: tx.to.toLowerCase() === addr ? "in" : "out",
       asset: nativeSymbol,
       amount: Number(tx.value) / 1e18,
-      gasUsd: undefined,
       type: "native",
     }));
 

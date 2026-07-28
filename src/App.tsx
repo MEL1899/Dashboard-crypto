@@ -1,13 +1,15 @@
 import { useState, type ReactNode } from "react";
 import clsx from "clsx";
-import { LayoutDashboard, Settings, Wallet } from "lucide-react";
+import { Activity, LayoutDashboard, Settings, Wallet } from "lucide-react";
 import { useMarketData } from "./hooks/useMarketData";
 import { useWallet } from "./hooks/useWallet";
+import { useDerivatives } from "./hooks/useDerivatives";
 import { loadSettings, saveSettings } from "./lib/settings";
 import { MarketOverview } from "./components/MarketOverview";
 import { PriceChart } from "./components/PriceChart";
 import { TokenSelector } from "./components/TokenSelector";
 import { WalletPanel } from "./components/WalletPanel";
+import { DerivativesPanel } from "./components/DerivativesPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { Spinner } from "./components/common";
 import type { ChainKey } from "./types";
@@ -19,7 +21,7 @@ const RANGE_OPTIONS = [
   { label: "180D", days: 180 },
 ];
 
-type Tab = "market" | "wallet";
+type Tab = "market" | "derivatives" | "wallet";
 
 function App() {
   const [settings, setSettings] = useState(loadSettings());
@@ -34,6 +36,7 @@ function App() {
 
   const market = useMarketData(tokenId, days, settings.coingeckoApiKey || undefined);
   const wallet = useWallet(walletQuery.address, walletQuery.chain, settings.etherscanApiKey);
+  const derivatives = useDerivatives(tokenId);
 
   const selectedToken = market.tokens.find((t) => t.id === tokenId);
 
@@ -73,6 +76,13 @@ function App() {
           <nav className="flex items-center gap-1 rounded-lg border border-[var(--color-border)] p-1">
             <TabButton active={tab === "market"} onClick={() => setTab("market")} icon={<LayoutDashboard size={14} />}>
               Mercado
+            </TabButton>
+            <TabButton
+              active={tab === "derivatives"}
+              onClick={() => setTab("derivatives")}
+              icon={<Activity size={14} />}
+            >
+              Derivativos
             </TabButton>
             <TabButton active={tab === "wallet"} onClick={() => setTab("wallet")} icon={<Wallet size={14} />}>
               Carteira
@@ -146,6 +156,17 @@ function App() {
               </>
             )}
           </div>
+        ) : tab === "derivatives" ? (
+          <DerivativesPanel
+            tokenSymbol={selectedToken?.symbol ?? tokenId.toUpperCase()}
+            loading={derivatives.loading || market.loading}
+            isDemo={derivatives.isDemo}
+            error={derivatives.error}
+            data={derivatives.data}
+            rsi={market.rsi}
+            bollinger={market.bollinger}
+            lastClose={market.candles.length ? market.candles[market.candles.length - 1].close : null}
+          />
         ) : (
           <WalletPanel
             address={walletQuery.address}
