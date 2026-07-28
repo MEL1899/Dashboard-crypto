@@ -2,6 +2,7 @@ import { lazy, Suspense, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { Activity, LayoutDashboard, Settings, Wallet } from "lucide-react";
 import { useMarketData } from "./hooks/useMarketData";
+import { useWatchlistTokens } from "./hooks/useWatchlistTokens";
 import { useWallet } from "./hooks/useWallet";
 import { useDerivatives } from "./hooks/useDerivatives";
 import { loadSettings, saveSettings } from "./lib/settings";
@@ -10,7 +11,7 @@ import { MarketWatchlist } from "./components/MarketWatchlist";
 import { TokenSelector } from "./components/TokenSelector";
 import { SettingsModal } from "./components/SettingsModal";
 import { Spinner } from "./components/common";
-import type { ChainKey } from "./types";
+import type { ChainKey, Timeframe } from "./types";
 
 // Code-split the heavy charting views (lightweight-charts / recharts) so the
 // initial bundle only pays for whichever tab is actually opened first.
@@ -32,11 +33,10 @@ function TabFallback() {
   );
 }
 
-const RANGE_OPTIONS = [
-  { label: "7D", days: 7 },
-  { label: "30D", days: 30 },
-  { label: "90D", days: 90 },
-  { label: "180D", days: 180 },
+const TIMEFRAME_OPTIONS: { label: string; value: Timeframe }[] = [
+  { label: "1H", value: "1h" },
+  { label: "4H", value: "4h" },
+  { label: "1D", value: "1d" },
 ];
 
 type Tab = "market" | "derivatives" | "wallet";
@@ -45,44 +45,61 @@ function App() {
   const [settings, setSettings] = useState(loadSettings());
   const [tab, setTab] = useState<Tab>("market");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [tokenId, setTokenId] = useState(settings.tokenId);
-  const [days, setDays] = useState(settings.days);
+  const [watchlist, setWatchlist] = useState<string[]>(settings.watchlist);
+  const [tokenId, setTokenId] = useState<string | null>(settings.selectedTokenId || null);
+  const [timeframe, setTimeframe] = useState<Timeframe>(settings.timeframe);
   const [walletQuery, setWalletQuery] = useState<{ address: string; chain: ChainKey }>({
     address: settings.walletAddress,
     chain: settings.chain,
   });
 
-  const market = useMarketData(tokenId, days, settings.coingeckoApiKey || undefined);
+  const watchlistTokens = useWatchlistTokens(watchlist, settings.coingeckoApiKey || undefined);
+  const market = useMarketData(tokenId, timeframe, settings.coingeckoApiKey || undefined);
   const wallet = useWallet(walletQuery.address, walletQuery.chain, settings.etherscanApiKey);
-  const derivatives = useDerivatives(tokenId);
+  const derivatives = useDerivatives(tokenId, timeframe);
 
-  const selectedToken = market.tokens.find((t) => t.id === tokenId);
+  const selectedToken = watchlistTokens.tokens.find((t) => t.id === tokenId);
 
-  function handleSaveSettings(next: typeof settings) {
+  function persist(next: typeof settings) {
     setSettings(next);
     saveSettings(next);
+  }
+
+  function handleSaveSettings(next: typeof settings) {
+    persist(next);
     setSettingsOpen(false);
   }
 
   function handleWalletSubmit(address: string, chain: ChainKey) {
     setWalletQuery({ address, chain });
-    const next = { ...settings, walletAddress: address, chain };
-    setSettings(next);
-    saveSettings(next);
+    persist({ ...settings, walletAddress: address, chain });
+  }
+
+  function handleAddToken(id: string) {
+    if (watchlist.includes(id)) return;
+    const nextWatchlist = [...watchlist, id];
+    setWatchlist(nextWatchlist);
+    const nextTokenId = tokenId ?? id;
+    setTokenId(nextTokenId);
+    persist({ ...settings, watchlist: nextWatchlist, selectedTokenId: nextTokenId });
+  }
+
+  function handleRemoveToken(id: string) {
+    const nextWatchlist = watchlist.filter((w) => w !== id);
+    setWatchlist(nextWatchlist);
+    const nextTokenId = tokenId === id ? (nextWatchlist[0] ?? null) : tokenId;
+    setTokenId(nextTokenId);
+    persist({ ...settings, watchlist: nextWatchlist, selectedTokenId: nextTokenId ?? "" });
   }
 
   function handleTokenSelect(id: string) {
     setTokenId(id);
-    const next = { ...settings, tokenId: id };
-    setSettings(next);
-    saveSettings(next);
+    persist({ ...settings, selectedTokenId: id });
   }
 
-  function handleDaysSelect(next: number) {
-    setDays(next);
-    const nextSettings = { ...settings, days: next };
-    setSettings(nextSettings);
-    saveSettings(nextSettings);
+  function handleTimeframeSelect(next: Timeframe) {
+    setTimeframe(next);
+    persist({ ...settings, timeframe: next });
   }
 
   return (
@@ -127,43 +144,64 @@ function App() {
       <main className="mx-auto max-w-6xl px-4 py-5">
         {tab === "market" ? (
           <div className="flex flex-col gap-4">
-            {market.isDemo && (
+            {watchlistTokens.isDemo && watchlist.length > 0 && (
               <div className="rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-3 py-2 text-xs text-[var(--color-text)]">
                 Modo demonstração: não foi possível carregar dados reais da CoinGecko agora
-                {market.error ? ` (${market.error})` : ""}. Exibindo dados simulados.
+                {watchlistTokens.error ? ` (${watchlistTokens.error})` : ""}. Exibindo dados
+                simulados.
               </div>
             )}
 
             <div className="flex flex-wrap items-center justify-between gap-3">
               <TokenSelector
-                tokens={market.tokens}
+                tokens={watchlistTokens.tokens}
                 selectedId={tokenId}
                 onSelect={handleTokenSelect}
+                onAdd={handleAddToken}
+                onRemove={handleRemoveToken}
+                apiKey={settings.coingeckoApiKey || undefined}
               />
-              <div className="flex items-center gap-1 rounded-lg border border-[var(--color-border)] p-1">
-                {RANGE_OPTIONS.map((r) => (
-                  <button
-                    key={r.days}
-                    onClick={() => handleDaysSelect(r.days)}
-                    className={clsx(
-                      "rounded-md px-2.5 py-1 text-xs",
-                      days === r.days
-                        ? "bg-[var(--color-accent)] text-white"
-                        : "text-[var(--color-text-dim)] hover:text-[var(--color-text)]",
-                    )}
-                  >
-                    {r.label}
-                  </button>
-                ))}
-              </div>
+              {watchlist.length > 0 && (
+                <div className="flex items-center gap-1 rounded-lg border border-[var(--color-border)] p-1">
+                  {TIMEFRAME_OPTIONS.map((t) => (
+                    <button
+                      key={t.value}
+                      onClick={() => handleTimeframeSelect(t.value)}
+                      className={clsx(
+                        "rounded-md px-2.5 py-1 text-xs",
+                        timeframe === t.value
+                          ? "bg-[var(--color-accent)] text-white"
+                          : "text-[var(--color-text-dim)] hover:text-[var(--color-text)]",
+                      )}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {market.loading ? (
+            {watchlist.length === 0 ? (
+              <div className="flex flex-col items-center gap-1 rounded-xl border border-dashed border-[var(--color-border)] py-16 text-center">
+                <p className="text-sm font-medium text-[var(--color-text)]">
+                  Sua watchlist está vazia
+                </p>
+                <p className="max-w-xs text-xs text-[var(--color-text-dim)]">
+                  Use a busca acima (ou as sugestões) para adicionar as criptos que você quer
+                  acompanhar.
+                </p>
+              </div>
+            ) : market.loading || !tokenId ? (
               <div className="flex h-96 items-center justify-center">
                 <Spinner />
               </div>
             ) : (
               <>
+                {market.isDemo && (
+                  <div className="rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-3 py-2 text-xs text-[var(--color-text)]">
+                    Modo demonstração para o gráfico: {market.error}. Exibindo candles simulados.
+                  </div>
+                )}
                 <MarketOverview
                   token={selectedToken}
                   candles={market.candles}
@@ -181,7 +219,7 @@ function App() {
                   </Suspense>
                 </div>
                 <MarketWatchlist
-                  tokens={market.tokens}
+                  tokens={watchlistTokens.tokens}
                   selectedId={tokenId}
                   onSelect={handleTokenSelect}
                 />
@@ -189,18 +227,31 @@ function App() {
             )}
           </div>
         ) : tab === "derivatives" ? (
-          <Suspense fallback={<TabFallback />}>
-            <DerivativesPanel
-              tokenSymbol={selectedToken?.symbol ?? tokenId.toUpperCase()}
-              loading={derivatives.loading || market.loading}
-              isDemo={derivatives.isDemo}
-              error={derivatives.error}
-              data={derivatives.data}
-              rsi={market.rsi}
-              bollinger={market.bollinger}
-              lastClose={market.candles.length ? market.candles[market.candles.length - 1].close : null}
-            />
-          </Suspense>
+          !tokenId ? (
+            <div className="flex flex-col items-center gap-1 rounded-xl border border-dashed border-[var(--color-border)] py-16 text-center">
+              <p className="text-sm font-medium text-[var(--color-text)]">
+                Nenhum ativo selecionado
+              </p>
+              <p className="max-w-xs text-xs text-[var(--color-text-dim)]">
+                Adicione e selecione uma cripto na aba Mercado para ver os dados de derivativos.
+              </p>
+            </div>
+          ) : (
+            <Suspense fallback={<TabFallback />}>
+              <DerivativesPanel
+                tokenSymbol={selectedToken?.symbol ?? tokenId.toUpperCase()}
+                loading={derivatives.loading || market.loading}
+                isDemo={derivatives.isDemo}
+                error={derivatives.error}
+                data={derivatives.data}
+                rsi={market.rsi}
+                bollinger={market.bollinger}
+                lastClose={
+                  market.candles.length ? market.candles[market.candles.length - 1].close : null
+                }
+              />
+            </Suspense>
+          )
         ) : (
           <Suspense fallback={<TabFallback />}>
             <WalletPanel

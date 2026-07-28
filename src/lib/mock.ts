@@ -5,6 +5,7 @@ import type {
   FearGreedPoint,
   IndicatorPoint,
   MarketToken,
+  Timeframe,
   TradeInsights,
   WalletTokenBalance,
   WalletTransaction,
@@ -46,42 +47,53 @@ function seedFromString(id: string): number {
   return h;
 }
 
-export function mockMarketTokens(ids: string[]): MarketToken[] {
-  return ids
-    .filter((id) => MOCK_TOKEN_META[id])
-    .map((id) => {
-      const meta = MOCK_TOKEN_META[id];
-      const rng = mulberry32(seedFromString(id));
-      const change24h = (rng() - 0.45) * 14;
-      return {
-        id,
-        symbol: meta.symbol,
-        name: meta.name,
-        image: "",
-        price: meta.basePrice * (1 + (rng() - 0.5) * 0.02),
-        change24h,
-        marketCap: meta.basePrice * 19_000_000 * (0.8 + rng() * 0.4),
-        volume24h: meta.basePrice * 900_000 * (0.5 + rng()),
-      };
-    });
+/** Known tokens get realistic prices; anything else (user-searched) still gets a plausible synthetic entry. */
+function mockTokenMeta(id: string): { symbol: string; name: string; basePrice: number } {
+  if (MOCK_TOKEN_META[id]) return MOCK_TOKEN_META[id];
+  const rng = mulberry32(seedFromString(id));
+  const magnitude = 10 ** (rng() * 5 - 1); // ~0.1 to ~10,000
+  return {
+    symbol: id.slice(0, 5).toUpperCase(),
+    name: id,
+    basePrice: magnitude * (0.5 + rng()),
+  };
 }
 
-export function mockCandles(tokenId: string, days: number): Candle[] {
-  const meta = MOCK_TOKEN_META[tokenId] ?? {
-    symbol: "TKN",
-    name: tokenId,
-    basePrice: 100,
-  };
-  const rng = mulberry32(seedFromString(tokenId) ^ days);
-  const points = Math.max(30, Math.min(days, 180));
+export function mockMarketTokens(ids: string[]): MarketToken[] {
+  return ids.map((id) => {
+    const meta = mockTokenMeta(id);
+    const rng = mulberry32(seedFromString(id));
+    const change24h = (rng() - 0.45) * 14;
+    return {
+      id,
+      symbol: meta.symbol,
+      name: meta.name,
+      image: "",
+      price: meta.basePrice * (1 + (rng() - 0.5) * 0.02),
+      change24h,
+      marketCap: meta.basePrice * 19_000_000 * (0.8 + rng() * 0.4),
+      volume24h: meta.basePrice * 900_000 * (0.5 + rng()),
+    };
+  });
+}
+
+const TIMEFRAME_MOCK_CONFIG: Record<Timeframe, { points: number; stepSeconds: number }> = {
+  "1h": { points: 168, stepSeconds: 3600 },
+  "4h": { points: 180, stepSeconds: 4 * 3600 },
+  "1d": { points: 180, stepSeconds: 86400 },
+};
+
+export function mockCandles(tokenId: string, timeframe: Timeframe): Candle[] {
+  const meta = mockTokenMeta(tokenId);
+  const { points, stepSeconds } = TIMEFRAME_MOCK_CONFIG[timeframe];
+  const rng = mulberry32(seedFromString(tokenId) ^ seedFromString(timeframe));
   const now = Math.floor(Date.now() / 1000);
-  const dayStep = 86400;
 
   const candles: Candle[] = [];
   let price = meta.basePrice * (0.75 + rng() * 0.2);
 
   for (let i = points; i >= 0; i--) {
-    const time = now - i * dayStep;
+    const time = now - i * stepSeconds;
     const drift = (rng() - 0.5) * 0.06;
     const open = price;
     const close = Math.max(0.0001, open * (1 + drift));
@@ -206,15 +218,18 @@ export function mockFearGreed(days = 30): FearGreedPoint[] {
   return points;
 }
 
-export function mockDerivatives(tokenId: string): DerivativesSnapshot {
+export function mockDerivatives(tokenId: string, timeframe: Timeframe = "1h"): DerivativesSnapshot {
   const symbol = symbolForToken(tokenId);
-  const rng = mulberry32(seedFromString(tokenId + ":deriv"));
+  const meta = mockTokenMeta(tokenId);
+  const rng = mulberry32(seedFromString(tokenId + ":deriv") ^ seedFromString(timeframe));
   const now = Math.floor(Date.now() / 1000);
-  const hourStep = 3600;
+  // Funding always settles every 8h on Binance regardless of chart timeframe.
+  const fundingStep = 8 * 3600;
+  const { stepSeconds: periodStep } = TIMEFRAME_MOCK_CONFIG[timeframe];
   const points = 60;
 
   const fundingHistory = Array.from({ length: points }).map((_, i) => ({
-    time: now - (points - i) * (8 * hourStep),
+    time: now - (points - i) * fundingStep,
     rate: (rng() - 0.5) * 0.0012,
   }));
 
@@ -222,9 +237,9 @@ export function mockDerivatives(tokenId: string): DerivativesSnapshot {
   const openInterestHistory = Array.from({ length: points }).map((_, i) => {
     oiBase = Math.max(1000, oiBase * (1 + (rng() - 0.5) * 0.04));
     return {
-      time: now - (points - i) * hourStep,
+      time: now - (points - i) * periodStep,
       value: oiBase,
-      valueUsd: oiBase * (MOCK_TOKEN_META[tokenId]?.basePrice ?? 100),
+      valueUsd: oiBase * meta.basePrice,
     };
   });
 
@@ -232,7 +247,7 @@ export function mockDerivatives(tokenId: string): DerivativesSnapshot {
     const longPct = 45 + rng() * 20;
     const shortPct = 100 - longPct;
     return {
-      time: now - (points - i) * hourStep,
+      time: now - (points - i) * periodStep,
       longAccountPct: longPct,
       shortAccountPct: shortPct,
       ratio: longPct / shortPct,
@@ -243,9 +258,9 @@ export function mockDerivatives(tokenId: string): DerivativesSnapshot {
 
   return {
     symbol,
-    markPrice: MOCK_TOKEN_META[tokenId]?.basePrice ?? null,
+    markPrice: meta.basePrice,
     lastFundingRate: lastFunding?.rate ?? null,
-    nextFundingTime: now + hourStep * (rng() * 8),
+    nextFundingTime: now + 3600 * (rng() * 8),
     fundingHistory,
     openInterestHistory,
     longShortHistory,

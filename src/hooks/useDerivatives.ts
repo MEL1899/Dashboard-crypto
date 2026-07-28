@@ -8,7 +8,7 @@ import {
 } from "../lib/binanceFutures";
 import { fetchFearGreedIndex } from "../lib/fearGreed";
 import { mockDerivatives, mockFearGreed } from "../lib/mock";
-import type { DerivativesSnapshot } from "../types";
+import type { DerivativesSnapshot, Timeframe } from "../types";
 
 interface DerivativesState {
   loading: boolean;
@@ -17,19 +17,27 @@ interface DerivativesState {
   data: DerivativesSnapshot | null;
 }
 
-export function useDerivatives(tokenId: string) {
-  const [state, setState] = useState<DerivativesState>({
-    loading: true,
-    isDemo: false,
-    error: null,
-    data: null,
-  });
+const EMPTY_STATE: DerivativesState = {
+  loading: false,
+  isDemo: false,
+  error: null,
+  data: null,
+};
+
+export function useDerivatives(tokenId: string | null, timeframe: Timeframe) {
+  const [state, setState] = useState<DerivativesState>(EMPTY_STATE);
 
   useEffect(() => {
+    if (!tokenId) {
+      setState(EMPTY_STATE);
+      return;
+    }
+
     let cancelled = false;
     setState((s) => ({ ...s, loading: true, error: null }));
 
     async function load() {
+      if (!tokenId) return;
       const symbol = symbolForToken(tokenId);
 
       if (!symbol) {
@@ -59,8 +67,8 @@ export function useDerivatives(tokenId: string) {
           await Promise.all([
             fetchPremiumIndex(symbol),
             fetchFundingRateHistory(symbol),
-            fetchOpenInterestHistory(symbol),
-            fetchLongShortRatio(symbol),
+            fetchOpenInterestHistory(symbol, timeframe),
+            fetchLongShortRatio(symbol, timeframe),
             fetchFearGreedIndex(),
           ]);
         if (cancelled) return;
@@ -86,7 +94,7 @@ export function useDerivatives(tokenId: string) {
           isDemo: true,
           error:
             err instanceof Error ? err.message : "Failed to load derivatives data",
-          data: mockDerivatives(tokenId),
+          data: mockDerivatives(tokenId, timeframe),
         });
       }
     }
@@ -95,7 +103,7 @@ export function useDerivatives(tokenId: string) {
     return () => {
       cancelled = true;
     };
-  }, [tokenId]);
+  }, [tokenId, timeframe]);
 
   return state;
 }
