@@ -7,8 +7,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   coingeckoApiKey: "",
   chain: "eth",
   walletAddress: "",
-  tokenId: "bitcoin",
-  days: 30,
+  watchlist: [],
+  selectedTokenId: "",
+  timeframe: "1d",
 };
 
 export function loadSettings(): AppSettings {

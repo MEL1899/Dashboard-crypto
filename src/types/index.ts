@@ -72,13 +72,16 @@ export interface BollingerBands {
   lower: number;
 }
 
+export type Timeframe = "1h" | "4h" | "1d";
+
 export interface AppSettings {
   etherscanApiKey: string;
   coingeckoApiKey: string;
   chain: ChainKey;
   walletAddress: string;
-  tokenId: string;
-  days: number;
+  watchlist: string[];
+  selectedTokenId: string;
+  timeframe: Timeframe;
 }
 
 export interface FundingRatePoint {
