@@ -34,8 +34,6 @@ export interface WalletTokenBalance {
   name: string;
   decimals: number;
   balance: number;
-  priceUsd?: number;
-  valueUsd?: number;
 }
 
 export type TxDirection = "in" | "out";
@@ -48,8 +46,6 @@ export interface WalletTransaction {
   direction: TxDirection;
   asset: string;
   amount: number;
-  valueUsd?: number;
-  gasUsd?: number;
   type: "native" | "token";
 }
 
@@ -82,4 +78,39 @@ export interface AppSettings {
   chain: ChainKey;
   walletAddress: string;
   tokenId: string;
+}
+
+export interface FundingRatePoint {
+  time: number;
+  rate: number; // fraction, e.g. 0.0001 = 0.01%
+}
+
+export interface OpenInterestPoint {
+  time: number;
+  value: number; // in base asset units
+  valueUsd: number;
+}
+
+export interface LongShortRatioPoint {
+  time: number;
+  longAccountPct: number;
+  shortAccountPct: number;
+  ratio: number; // longAccountPct / shortAccountPct
+}
+
+export interface FearGreedPoint {
+  time: number;
+  value: number; // 0-100
+  classification: string;
+}
+
+export interface DerivativesSnapshot {
+  symbol: string | null; // Binance Futures symbol, null if unsupported asset
+  markPrice: number | null;
+  lastFundingRate: number | null;
+  nextFundingTime: number | null;
+  fundingHistory: FundingRatePoint[];
+  openInterestHistory: OpenInterestPoint[];
+  longShortHistory: LongShortRatioPoint[];
+  fearGreed: FearGreedPoint[];
 }
