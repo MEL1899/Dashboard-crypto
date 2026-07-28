@@ -78,6 +78,7 @@ export interface AppSettings {
   chain: ChainKey;
   walletAddress: string;
   tokenId: string;
+  days: number;
 }
 
 export interface FundingRatePoint {

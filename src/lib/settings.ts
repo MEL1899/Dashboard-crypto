@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chain: "eth",
   walletAddress: "",
   tokenId: "bitcoin",
+  days: 30,
 };
 
 export function loadSettings(): AppSettings {

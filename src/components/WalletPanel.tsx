@@ -1,18 +1,23 @@
 import { useState, type FormEvent } from "react";
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
+  CartesianGrid,
   Cell,
   Pie,
   PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
+  YAxis,
 } from "recharts";
 import type { ChainKey } from "../types";
 import type { WalletSnapshot } from "../lib/etherscan";
 import { CHAINS, isValidEvmAddress } from "../lib/chains";
-import { Badge, Card, Spinner, formatNumber, shortenAddress, timeAgo } from "./common";
+import { useChainTvl } from "../hooks/useChainTvl";
+import { Badge, Card, Spinner, formatNumber, formatUsd, shortenAddress, timeAgo } from "./common";
 
 const PIE_COLORS = ["#7c6cff", "#22d3ee", "#22c55e", "#f59e0b", "#f43f5e", "#8b93a7"];
 
@@ -81,6 +86,8 @@ export function WalletPanel({
           <p className="mt-2 text-xs text-[var(--color-down)]">{validationError}</p>
         )}
       </Card>
+
+      <ChainTvlCard chain={chainInput} />
 
       {loading && (
         <Card className="flex items-center justify-center py-10">
@@ -232,5 +239,74 @@ export function WalletPanel({
         </>
       )}
     </div>
+  );
+}
+
+function ChainTvlCard({ chain }: { chain: ChainKey }) {
+  const tvl = useChainTvl(chain);
+  const last = tvl.data[tvl.data.length - 1];
+  const first = tvl.data[0];
+  const changePct = last && first ? ((last.value - first.value) / first.value) * 100 : null;
+
+  return (
+    <Card
+      title={`TVL — ${CHAINS[chain].label} (DeFiLlama, 90d)`}
+      action={
+        last && (
+          <div className="text-right">
+            <div className="num-mono text-sm font-semibold text-[var(--color-text)]">
+              {formatUsd(last.value)}
+            </div>
+            {changePct !== null && (
+              <Badge tone={changePct >= 0 ? "up" : "down"}>
+                {changePct >= 0 ? "▲" : "▼"} {Math.abs(changePct).toFixed(1)}%
+              </Badge>
+            )}
+          </div>
+        )
+      }
+    >
+      {tvl.loading ? (
+        <div className="flex h-24 items-center justify-center">
+          <Spinner />
+        </div>
+      ) : (
+        <>
+          {tvl.isDemo && (
+            <p className="mb-2 text-xs text-[var(--color-text-dim)]">
+              Modo demonstração (dados simulados) — {tvl.error}
+            </p>
+          )}
+          <div className="h-24">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={tvl.data}>
+                <CartesianGrid stroke="#1c1f2a" vertical={false} />
+                <XAxis dataKey="time" hide />
+                <YAxis hide domain={["dataMin", "dataMax"]} />
+                <Tooltip
+                  contentStyle={{
+                    background: "#191c26",
+                    border: "1px solid #262a38",
+                    borderRadius: 8,
+                    fontSize: 12,
+                  }}
+                  labelFormatter={(v) =>
+                    new Date(Number(v) * 1000).toLocaleDateString("pt-BR")
+                  }
+                  formatter={(v) => [formatUsd(Number(v)), "TVL"]}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="value"
+                  stroke="#22d3ee"
+                  fill="#22d3ee33"
+                  strokeWidth={2}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </>
+      )}
+    </Card>
   );
 }
