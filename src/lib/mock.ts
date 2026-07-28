@@ -1,7 +1,9 @@
 import type {
   Candle,
+  ChainKey,
   DerivativesSnapshot,
   FearGreedPoint,
+  IndicatorPoint,
   MarketToken,
   TradeInsights,
   WalletTokenBalance,
@@ -249,4 +251,24 @@ export function mockDerivatives(tokenId: string): DerivativesSnapshot {
     longShortHistory,
     fearGreed: mockFearGreed(),
   };
+}
+
+const CHAIN_TVL_BASE: Record<ChainKey, number> = {
+  eth: 55_000_000_000,
+  bsc: 5_500_000_000,
+  polygon: 1_000_000_000,
+  arbitrum: 2_800_000_000,
+  base: 3_200_000_000,
+};
+
+export function mockChainTvl(chain: ChainKey, days = 90): IndicatorPoint[] {
+  const rng = mulberry32(seedFromString(chain + ":tvl"));
+  const now = Math.floor(Date.now() / 1000);
+  let value = CHAIN_TVL_BASE[chain];
+  const points: IndicatorPoint[] = [];
+  for (let i = days; i >= 0; i--) {
+    value = Math.max(1_000_000, value * (1 + (rng() - 0.48) * 0.03));
+    points.push({ time: now - i * 86400, value });
+  }
+  return points;
 }

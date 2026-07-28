@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { lazy, Suspense, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { Activity, LayoutDashboard, Settings, Wallet } from "lucide-react";
 import { useMarketData } from "./hooks/useMarketData";
@@ -6,13 +6,30 @@ import { useWallet } from "./hooks/useWallet";
 import { useDerivatives } from "./hooks/useDerivatives";
 import { loadSettings, saveSettings } from "./lib/settings";
 import { MarketOverview } from "./components/MarketOverview";
-import { PriceChart } from "./components/PriceChart";
 import { TokenSelector } from "./components/TokenSelector";
-import { WalletPanel } from "./components/WalletPanel";
-import { DerivativesPanel } from "./components/DerivativesPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { Spinner } from "./components/common";
 import type { ChainKey } from "./types";
+
+// Code-split the heavy charting views (lightweight-charts / recharts) so the
+// initial bundle only pays for whichever tab is actually opened first.
+const PriceChart = lazy(() =>
+  import("./components/PriceChart").then((m) => ({ default: m.PriceChart })),
+);
+const DerivativesPanel = lazy(() =>
+  import("./components/DerivativesPanel").then((m) => ({ default: m.DerivativesPanel })),
+);
+const WalletPanel = lazy(() =>
+  import("./components/WalletPanel").then((m) => ({ default: m.WalletPanel })),
+);
+
+function TabFallback() {
+  return (
+    <div className="flex h-96 items-center justify-center">
+      <Spinner />
+    </div>
+  );
+}
 
 const RANGE_OPTIONS = [
   { label: "7D", days: 7 },
@@ -28,7 +45,7 @@ function App() {
   const [tab, setTab] = useState<Tab>("market");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tokenId, setTokenId] = useState(settings.tokenId);
-  const [days, setDays] = useState(30);
+  const [days, setDays] = useState(settings.days);
   const [walletQuery, setWalletQuery] = useState<{ address: string; chain: ChainKey }>({
     address: settings.walletAddress,
     chain: settings.chain,
@@ -58,6 +75,13 @@ function App() {
     const next = { ...settings, tokenId: id };
     setSettings(next);
     saveSettings(next);
+  }
+
+  function handleDaysSelect(next: number) {
+    setDays(next);
+    const nextSettings = { ...settings, days: next };
+    setSettings(nextSettings);
+    saveSettings(nextSettings);
   }
 
   return (
@@ -119,7 +143,7 @@ function App() {
                 {RANGE_OPTIONS.map((r) => (
                   <button
                     key={r.days}
-                    onClick={() => setDays(r.days)}
+                    onClick={() => handleDaysSelect(r.days)}
                     className={clsx(
                       "rounded-md px-2.5 py-1 text-xs",
                       days === r.days
@@ -146,37 +170,43 @@ function App() {
                   bollinger={market.bollinger}
                 />
                 <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
-                  <PriceChart
-                    candles={market.candles}
-                    bollinger={market.bollinger}
-                    rsi={market.rsi}
-                    volume={market.volume}
-                  />
+                  <Suspense fallback={<TabFallback />}>
+                    <PriceChart
+                      candles={market.candles}
+                      bollinger={market.bollinger}
+                      rsi={market.rsi}
+                      volume={market.volume}
+                    />
+                  </Suspense>
                 </div>
               </>
             )}
           </div>
         ) : tab === "derivatives" ? (
-          <DerivativesPanel
-            tokenSymbol={selectedToken?.symbol ?? tokenId.toUpperCase()}
-            loading={derivatives.loading || market.loading}
-            isDemo={derivatives.isDemo}
-            error={derivatives.error}
-            data={derivatives.data}
-            rsi={market.rsi}
-            bollinger={market.bollinger}
-            lastClose={market.candles.length ? market.candles[market.candles.length - 1].close : null}
-          />
+          <Suspense fallback={<TabFallback />}>
+            <DerivativesPanel
+              tokenSymbol={selectedToken?.symbol ?? tokenId.toUpperCase()}
+              loading={derivatives.loading || market.loading}
+              isDemo={derivatives.isDemo}
+              error={derivatives.error}
+              data={derivatives.data}
+              rsi={market.rsi}
+              bollinger={market.bollinger}
+              lastClose={market.candles.length ? market.candles[market.candles.length - 1].close : null}
+            />
+          </Suspense>
         ) : (
-          <WalletPanel
-            address={walletQuery.address}
-            chain={walletQuery.chain}
-            loading={wallet.loading}
-            isDemo={wallet.isDemo}
-            error={wallet.error}
-            snapshot={wallet.snapshot}
-            onSubmit={handleWalletSubmit}
-          />
+          <Suspense fallback={<TabFallback />}>
+            <WalletPanel
+              address={walletQuery.address}
+              chain={walletQuery.chain}
+              loading={wallet.loading}
+              isDemo={wallet.isDemo}
+              error={wallet.error}
+              snapshot={wallet.snapshot}
+              onSubmit={handleWalletSubmit}
+            />
+          </Suspense>
         )}
       </main>
 
