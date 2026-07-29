@@ -1,8 +1,6 @@
 import type {
   Candle,
   ChainKey,
-  DerivativesSnapshot,
-  FearGreedPoint,
   IndicatorPoint,
   MarketToken,
   Timeframe,
@@ -11,7 +9,6 @@ import type {
   WalletTransaction,
 } from "../types";
 import type { WalletSnapshot } from "./etherscan";
-import { symbolForToken } from "./binanceFutures";
 
 // Deterministic PRNG so demo mode looks the same across reloads/screenshots.
 function mulberry32(seed: number) {
@@ -59,6 +56,14 @@ function mockTokenMeta(id: string): { symbol: string; name: string; basePrice: n
   };
 }
 
+/** Deterministic "current price" for a token, independent of timeframe, so
+ * every view of the same asset (pills, table, chart) agrees on one value. */
+function mockCurrentPrice(tokenId: string): number {
+  const meta = mockTokenMeta(tokenId);
+  const rng = mulberry32(seedFromString(tokenId));
+  return meta.basePrice * (1 + (rng() - 0.5) * 0.02);
+}
+
 export function mockMarketTokens(ids: string[]): MarketToken[] {
   return ids.map((id) => {
     const meta = mockTokenMeta(id);
@@ -69,7 +74,7 @@ export function mockMarketTokens(ids: string[]): MarketToken[] {
       symbol: meta.symbol,
       name: meta.name,
       image: "",
-      price: meta.basePrice * (1 + (rng() - 0.5) * 0.02),
+      price: mockCurrentPrice(id),
       change24h,
       marketCap: meta.basePrice * 19_000_000 * (0.8 + rng() * 0.4),
       volume24h: meta.basePrice * 900_000 * (0.5 + rng()),
@@ -102,6 +107,19 @@ export function mockCandles(tokenId: string, timeframe: Timeframe): Candle[] {
     const volume = meta.basePrice * 500_000 * (0.4 + rng());
     candles.push({ time, open, high, low, close, volume });
     price = close;
+  }
+
+  // Every timeframe gets its own randomly-shaped walk (that's realistic —
+  // real 1h/4h/1d candles genuinely look different) but must all end at the
+  // same current price, exactly like real data always does.
+  const target = mockCurrentPrice(tokenId);
+  const actualLastClose = candles[candles.length - 1].close;
+  const scale = target / actualLastClose;
+  for (const candle of candles) {
+    candle.open *= scale;
+    candle.high *= scale;
+    candle.low *= scale;
+    candle.close *= scale;
   }
 
   return candles;
@@ -187,84 +205,6 @@ export function mockWalletSnapshot(address: string, chain: string): WalletSnapsh
     transactions,
     holdings,
     insights,
-  };
-}
-
-const FNG_LABELS = [
-  { max: 24, label: "Medo Extremo" },
-  { max: 44, label: "Medo" },
-  { max: 55, label: "Neutro" },
-  { max: 75, label: "Ganância" },
-  { max: 101, label: "Ganância Extrema" },
-];
-
-function classifyFng(value: number): string {
-  return FNG_LABELS.find((b) => value <= b.max)!.label;
-}
-
-export function mockFearGreed(days = 30): FearGreedPoint[] {
-  const rng = mulberry32(0xf6ee6);
-  const now = Math.floor(Date.now() / 1000);
-  let value = 45;
-  const points: FearGreedPoint[] = [];
-  for (let i = days; i >= 0; i--) {
-    value = Math.min(95, Math.max(5, value + (rng() - 0.5) * 14));
-    points.push({
-      time: now - i * 86400,
-      value: Math.round(value),
-      classification: classifyFng(value),
-    });
-  }
-  return points;
-}
-
-export function mockDerivatives(tokenId: string, timeframe: Timeframe = "1h"): DerivativesSnapshot {
-  const symbol = symbolForToken(tokenId);
-  const meta = mockTokenMeta(tokenId);
-  const rng = mulberry32(seedFromString(tokenId + ":deriv") ^ seedFromString(timeframe));
-  const now = Math.floor(Date.now() / 1000);
-  // Funding always settles every 8h on Binance regardless of chart timeframe.
-  const fundingStep = 8 * 3600;
-  const { stepSeconds: periodStep } = TIMEFRAME_MOCK_CONFIG[timeframe];
-  const points = 60;
-
-  const fundingHistory = Array.from({ length: points }).map((_, i) => ({
-    time: now - (points - i) * fundingStep,
-    rate: (rng() - 0.5) * 0.0012,
-  }));
-
-  let oiBase = 50_000 + rng() * 200_000;
-  const openInterestHistory = Array.from({ length: points }).map((_, i) => {
-    oiBase = Math.max(1000, oiBase * (1 + (rng() - 0.5) * 0.04));
-    return {
-      time: now - (points - i) * periodStep,
-      value: oiBase,
-      valueUsd: oiBase * meta.basePrice,
-    };
-  });
-
-  const longShortHistory = Array.from({ length: points }).map((_, i) => {
-    const longPct = 45 + rng() * 20;
-    const shortPct = 100 - longPct;
-    return {
-      time: now - (points - i) * periodStep,
-      longAccountPct: longPct,
-      shortAccountPct: shortPct,
-      ratio: longPct / shortPct,
-    };
-  });
-
-  const lastFunding = fundingHistory[fundingHistory.length - 1];
-
-  return {
-    symbol,
-    markPrice: meta.basePrice,
-    lastFundingRate: lastFunding?.rate ?? null,
-    nextFundingTime: now + 3600 * (rng() * 8),
-    fundingHistory,
-    openInterestHistory,
-    longShortHistory,
-    fearGreed: mockFearGreed(),
   };
 }
 

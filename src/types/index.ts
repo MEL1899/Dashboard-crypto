@@ -83,38 +83,3 @@ export interface AppSettings {
   selectedTokenId: string;
   timeframe: Timeframe;
 }
-
-export interface FundingRatePoint {
-  time: number;
-  rate: number; // fraction, e.g. 0.0001 = 0.01%
-}
-
-export interface OpenInterestPoint {
-  time: number;
-  value: number; // in base asset units
-  valueUsd: number;
-}
-
-export interface LongShortRatioPoint {
-  time: number;
-  longAccountPct: number;
-  shortAccountPct: number;
-  ratio: number; // longAccountPct / shortAccountPct
-}
-
-export interface FearGreedPoint {
-  time: number;
-  value: number; // 0-100
-  classification: string;
-}
-
-export interface DerivativesSnapshot {
-  symbol: string | null; // Binance Futures symbol, null if unsupported asset
-  markPrice: number | null;
-  lastFundingRate: number | null;
-  nextFundingTime: number | null;
-  fundingHistory: FundingRatePoint[];
-  openInterestHistory: OpenInterestPoint[];
-  longShortHistory: LongShortRatioPoint[];
-  fearGreed: FearGreedPoint[];
-}

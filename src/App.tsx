@@ -1,10 +1,9 @@
 import { lazy, Suspense, useState, type ReactNode } from "react";
 import clsx from "clsx";
-import { Activity, LayoutDashboard, Settings, Wallet } from "lucide-react";
+import { LayoutDashboard, Settings, Wallet } from "lucide-react";
 import { useMarketData } from "./hooks/useMarketData";
 import { useWatchlistTokens } from "./hooks/useWatchlistTokens";
 import { useWallet } from "./hooks/useWallet";
-import { useDerivatives } from "./hooks/useDerivatives";
 import { loadSettings, saveSettings } from "./lib/settings";
 import { MarketOverview } from "./components/MarketOverview";
 import { MarketWatchlist } from "./components/MarketWatchlist";
@@ -17,9 +16,6 @@ import type { ChainKey, Timeframe } from "./types";
 // initial bundle only pays for whichever tab is actually opened first.
 const PriceChart = lazy(() =>
   import("./components/PriceChart").then((m) => ({ default: m.PriceChart })),
-);
-const DerivativesPanel = lazy(() =>
-  import("./components/DerivativesPanel").then((m) => ({ default: m.DerivativesPanel })),
 );
 const WalletPanel = lazy(() =>
   import("./components/WalletPanel").then((m) => ({ default: m.WalletPanel })),
@@ -39,7 +35,7 @@ const TIMEFRAME_OPTIONS: { label: string; value: Timeframe }[] = [
   { label: "1D", value: "1d" },
 ];
 
-type Tab = "market" | "derivatives" | "wallet";
+type Tab = "market" | "wallet";
 
 function App() {
   const [settings, setSettings] = useState(loadSettings());
@@ -56,7 +52,6 @@ function App() {
   const watchlistTokens = useWatchlistTokens(watchlist, settings.coingeckoApiKey || undefined);
   const market = useMarketData(tokenId, timeframe, settings.coingeckoApiKey || undefined);
   const wallet = useWallet(walletQuery.address, walletQuery.chain, settings.etherscanApiKey);
-  const derivatives = useDerivatives(tokenId, timeframe);
 
   const selectedToken = watchlistTokens.tokens.find((t) => t.id === tokenId);
 
@@ -118,13 +113,6 @@ function App() {
           <nav className="flex items-center gap-1 rounded-lg border border-[var(--color-border)] p-1">
             <TabButton active={tab === "market"} onClick={() => setTab("market")} icon={<LayoutDashboard size={14} />}>
               Mercado
-            </TabButton>
-            <TabButton
-              active={tab === "derivatives"}
-              onClick={() => setTab("derivatives")}
-              icon={<Activity size={14} />}
-            >
-              Derivativos
             </TabButton>
             <TabButton active={tab === "wallet"} onClick={() => setTab("wallet")} icon={<Wallet size={14} />}>
               Carteira
@@ -226,32 +214,6 @@ function App() {
               </>
             )}
           </div>
-        ) : tab === "derivatives" ? (
-          !tokenId ? (
-            <div className="flex flex-col items-center gap-1 rounded-xl border border-dashed border-[var(--color-border)] py-16 text-center">
-              <p className="text-sm font-medium text-[var(--color-text)]">
-                Nenhum ativo selecionado
-              </p>
-              <p className="max-w-xs text-xs text-[var(--color-text-dim)]">
-                Adicione e selecione uma cripto na aba Mercado para ver os dados de derivativos.
-              </p>
-            </div>
-          ) : (
-            <Suspense fallback={<TabFallback />}>
-              <DerivativesPanel
-                tokenSymbol={selectedToken?.symbol ?? tokenId.toUpperCase()}
-                loading={derivatives.loading || market.loading}
-                isDemo={derivatives.isDemo}
-                error={derivatives.error}
-                data={derivatives.data}
-                rsi={market.rsi}
-                bollinger={market.bollinger}
-                lastClose={
-                  market.candles.length ? market.candles[market.candles.length - 1].close : null
-                }
-              />
-            </Suspense>
-          )
         ) : (
           <Suspense fallback={<TabFallback />}>
             <WalletPanel
