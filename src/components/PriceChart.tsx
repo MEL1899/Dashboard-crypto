@@ -14,13 +14,18 @@ interface PriceChartProps {
   bollinger: BollingerBands[];
   rsi: IndicatorPoint[];
   volume: IndicatorPoint[];
+  theme: "light" | "dark";
 }
 
-const CHART_BG = "#12141c";
-const GRID = "#1c1f2a";
-const TEXT = "#8b93a7";
+// lightweight-charts renders to <canvas>, which can't resolve CSS custom
+// properties — so each theme needs its own literal color set here, kept in
+// sync with the tokens in index.css.
+const THEME_COLORS = {
+  dark: { bg: "#12141c", grid: "#1c1f2a", text: "#8b93a7", accent: "#4f7cff", rsiLine: "#22d3ee" },
+  light: { bg: "#ffffff", grid: "#e4e7ee", text: "#5b6472", accent: "#3a63e0", rsiLine: "#0a8fa6" },
+};
 
-export function PriceChart({ candles, bollinger, rsi, volume }: PriceChartProps) {
+export function PriceChart({ candles, bollinger, rsi, volume, theme }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
 
@@ -28,18 +33,20 @@ export function PriceChart({ candles, bollinger, rsi, volume }: PriceChartProps)
     const container = containerRef.current;
     if (!container) return;
 
+    const colors = THEME_COLORS[theme];
+
     const chart = createChart(container, {
       layout: {
-        background: { color: CHART_BG },
-        textColor: TEXT,
-        panes: { separatorColor: GRID },
+        background: { color: colors.bg },
+        textColor: colors.text,
+        panes: { separatorColor: colors.grid },
       },
       grid: {
-        vertLines: { color: GRID },
-        horzLines: { color: GRID },
+        vertLines: { color: colors.grid },
+        horzLines: { color: colors.grid },
       },
-      rightPriceScale: { borderColor: GRID },
-      timeScale: { borderColor: GRID, timeVisible: true },
+      rightPriceScale: { borderColor: colors.grid },
+      timeScale: { borderColor: colors.grid, timeVisible: true },
       autoSize: true,
     });
     chartRef.current = chart;
@@ -69,7 +76,7 @@ export function PriceChart({ candles, bollinger, rsi, volume }: PriceChartProps)
     // Upper band = dynamic resistance/overbought zone, lower band = dynamic
     // support/oversold zone — same red/green semantics used everywhere else
     // in this app (RSI, 24h change), not an arbitrary color choice.
-    const bbColor = { upper: "#d03b3b", middle: "#8b93a7", lower: "#0ca30c" };
+    const bbColor = { upper: "#d03b3b", middle: colors.text, lower: "#0ca30c" };
     for (const key of ["upper", "middle", "lower"] as const) {
       const series = chart.addSeries(
         LineSeries,
@@ -91,7 +98,7 @@ export function PriceChart({ candles, bollinger, rsi, volume }: PriceChartProps)
     // Pane 1: volume
     const volumeSeries = chart.addSeries(
       HistogramSeries,
-      { color: "#4f7cff80", priceFormat: { type: "volume" } },
+      { color: `${colors.accent}80`, priceFormat: { type: "volume" } },
       1,
     );
     volumeSeries.setData(
@@ -101,7 +108,7 @@ export function PriceChart({ candles, bollinger, rsi, volume }: PriceChartProps)
     // Pane 2: RSI
     const rsiSeries = chart.addSeries(
       LineSeries,
-      { color: "#22d3ee", lineWidth: 2, lastValueVisible: true, priceLineVisible: false },
+      { color: colors.rsiLine, lineWidth: 2, lastValueVisible: true, priceLineVisible: false },
       2,
     );
     rsiSeries.setData(rsi.map((r) => ({ time: r.time as UTCTimestamp, value: r.value })));
@@ -117,7 +124,7 @@ export function PriceChart({ candles, bollinger, rsi, volume }: PriceChartProps)
       chart.remove();
       chartRef.current = null;
     };
-  }, [candles, bollinger, rsi, volume]);
+  }, [candles, bollinger, rsi, volume, theme]);
 
   return <div ref={containerRef} className="h-[560px] w-full" />;
 }

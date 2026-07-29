@@ -1,9 +1,10 @@
 import { lazy, Suspense, useState, type ReactNode } from "react";
 import clsx from "clsx";
-import { LayoutDashboard, Settings, Wallet, X } from "lucide-react";
+import { LayoutDashboard, Moon, Settings, Sun, Wallet, X } from "lucide-react";
 import { useMarketData } from "./hooks/useMarketData";
 import { useWatchlistTokens } from "./hooks/useWatchlistTokens";
 import { useWallet } from "./hooks/useWallet";
+import { useTheme } from "./hooks/useTheme";
 import { loadSettings, saveSettings } from "./lib/settings";
 import { MarketHighlights } from "./components/MarketHighlights";
 import { MarketOverview } from "./components/MarketOverview";
@@ -41,6 +42,7 @@ type Tab = "market" | "wallet";
 
 function App() {
   const [settings, setSettings] = useState(loadSettings());
+  const { theme, toggleTheme } = useTheme();
   const [tab, setTab] = useState<Tab>("market");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [watchlist, setWatchlist] = useState<string[]>(settings.watchlist);
@@ -125,13 +127,23 @@ function App() {
             </TabButton>
           </nav>
 
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
-          >
-            <Settings size={14} />
-            Configurações
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleTheme}
+              aria-label={theme === "dark" ? "Mudar para tema claro" : "Mudar para tema escuro"}
+              className="flex items-center justify-center rounded-lg border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
+            >
+              {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+            </button>
+
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
+            >
+              <Settings size={14} />
+              Configurações
+            </button>
+          </div>
         </div>
       </header>
 
@@ -229,6 +241,7 @@ function App() {
                               bollinger={market.bollinger}
                               rsi={market.rsi}
                               volume={market.volume}
+                              theme={theme}
                             />
                           </Suspense>
                         </div>

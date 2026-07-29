@@ -19,6 +19,24 @@
   color-scheme: dark;
 }
 
+/*
+ * Light theme — its own palette, not an automatic inversion of dark.
+ * Explicit data-theme (set by the header toggle) always wins over the
+ * dark defaults above; the OS preference only picks the *initial* value
+ * (see src/hooks/useTheme.ts).
+ */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-bg: #f1f3f8;
+  --color-surface: #ffffff;
+  --color-surface-2: #eef1f7;
+  --color-border: #dbe1ec;
+  --color-text: #161a24;
+  --color-text-dim: #5b6472;
+  --color-accent: #3a63e0;
+  --color-accent-2: #0a8fa6;
+}
+
 html,
 body,
 #root {
