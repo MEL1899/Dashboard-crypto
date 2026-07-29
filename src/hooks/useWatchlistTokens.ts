@@ -39,6 +39,12 @@ async function withBinancePrices(tokens: MarketToken[]): Promise<MarketToken[]> 
   }
 }
 
+// Price is the one number this app can never afford to show wrong or stale
+// — refetch on this cadence so the ticker keeps tracking the real market
+// instead of freezing at whatever it happened to be when the watchlist was
+// last touched.
+const PRICE_REFRESH_INTERVAL_MS = 30_000;
+
 export function useWatchlistTokens(ids: string[], apiKey?: string) {
   const key = ids.join(",");
   const [state, setState] = useState<WatchlistTokensState>({
@@ -60,27 +66,32 @@ export function useWatchlistTokens(ids: string[], apiKey?: string) {
     }
 
     let cancelled = false;
-    setState((s) => ({ ...s, loading: true, error: null }));
 
-    async function load() {
+    async function load(isInitial: boolean) {
+      if (isInitial) setState((s) => ({ ...s, loading: true, error: null }));
       try {
         const tokens = await withBinancePrices(await fetchMarketTokens(currentIds, apiKey));
         if (cancelled) return;
         setState({ loading: false, isDemo: false, error: null, tokens });
       } catch (err) {
         if (cancelled) return;
-        setState({
+        setState((s) => ({
           loading: false,
           isDemo: true,
           error: err instanceof Error ? err.message : "Failed to load watchlist",
-          tokens: mockMarketTokens(currentIds),
-        });
+          // A transient refresh failure shouldn't swap an already-correct
+          // real price for a completely different, made-up mock one — only
+          // fall back to mock if we never had real data to begin with.
+          tokens: !s.isDemo && s.tokens.length > 0 ? s.tokens : mockMarketTokens(currentIds),
+        }));
       }
     }
 
-    load();
+    load(true);
+    const refreshTimer = setInterval(() => load(false), PRICE_REFRESH_INTERVAL_MS);
     return () => {
       cancelled = true;
+      clearInterval(refreshTimer);
     };
   }, [key, apiKey]);
 

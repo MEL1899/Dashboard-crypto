@@ -157,7 +157,11 @@ export function formatPrice(value: number, currency: Currency): string {
   const abs = Math.abs(converted);
   if (abs === 0) return `${symbol}0.00`;
   if (abs < 1) return `${symbol}${converted.toFixed(abs < 0.01 ? 6 : 4)}`;
-  return `${symbol}${converted.toLocaleString(undefined, {
+  // Locale pinned to en-US, not the viewer's browser locale: the symbol is
+  // always "$"/"R$" chosen above, so the digit grouping has to match it —
+  // "undefined" here would format as "$1.521,68" for a pt-BR browser, a
+  // currency symbol glued to the wrong separator convention.
+  return `${symbol}${converted.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;

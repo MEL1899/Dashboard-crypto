@@ -49,6 +49,8 @@ const MOCK_TOKEN_META: Record<
   cosmos: { symbol: "ATOM", name: "Cosmos", basePrice: 7 },
   stellar: { symbol: "XLM", name: "Stellar", basePrice: 0.11 },
   filecoin: { symbol: "FIL", name: "Filecoin", basePrice: 5 },
+  hyperliquid: { symbol: "HYPE", name: "Hyperliquid", basePrice: 35 },
+  sui: { symbol: "SUI", name: "Sui", basePrice: 3.5 },
 };
 
 function seedFromString(id: string): number {

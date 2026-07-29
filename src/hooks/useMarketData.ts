@@ -25,6 +25,11 @@ const EMPTY_STATE: MarketDataState = {
   volume: [],
 };
 
+// Same "price must never be stale" rule as useWatchlistTokens — the open
+// chart's last candle is what the Preço card and Score are computed from,
+// so it has to keep refreshing on its own, not just when timeframe changes.
+const MARKET_DATA_REFRESH_INTERVAL_MS = 30_000;
+
 export function useMarketData(tokenId: string | null, timeframe: Timeframe, apiKey?: string) {
   const [state, setState] = useState<MarketDataState>(EMPTY_STATE);
 
@@ -35,10 +40,10 @@ export function useMarketData(tokenId: string | null, timeframe: Timeframe, apiK
     }
 
     let cancelled = false;
-    setState((s) => ({ ...s, loading: true, error: null }));
 
-    async function load() {
+    async function load(isInitial: boolean) {
       if (!tokenId) return;
+      if (isInitial) setState((s) => ({ ...s, loading: true, error: null }));
       try {
         const symbol = symbolForToken(tokenId);
         const candles = symbol
@@ -56,22 +61,33 @@ export function useMarketData(tokenId: string | null, timeframe: Timeframe, apiK
         });
       } catch (err) {
         if (cancelled) return;
-        const candles = mockCandles(tokenId, timeframe);
-        setState({
-          loading: false,
-          isDemo: true,
-          error: err instanceof Error ? err.message : "Failed to load market data",
-          candles,
-          rsi: calcRSI(candles),
-          bollinger: calcBollingerBands(candles),
-          volume: calcVolumeSeries(candles),
+        setState((s) => {
+          // Same rule as the watchlist ticker: a transient refresh failure
+          // keeps showing the last real candles instead of swapping to a
+          // completely different mock series. Mock is only for when we
+          // never had real data for this token/timeframe at all.
+          if (!s.isDemo && s.candles.length > 0) {
+            return { ...s, loading: false };
+          }
+          const candles = mockCandles(tokenId, timeframe);
+          return {
+            loading: false,
+            isDemo: true,
+            error: err instanceof Error ? err.message : "Failed to load market data",
+            candles,
+            rsi: calcRSI(candles),
+            bollinger: calcBollingerBands(candles),
+            volume: calcVolumeSeries(candles),
+          };
         });
       }
     }
 
-    load();
+    load(true);
+    const refreshTimer = setInterval(() => load(false), MARKET_DATA_REFRESH_INTERVAL_MS);
     return () => {
       cancelled = true;
+      clearInterval(refreshTimer);
     };
   }, [tokenId, timeframe, apiKey]);
 

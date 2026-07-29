@@ -30,6 +30,8 @@ export const BINANCE_SPOT_SYMBOL: Record<string, string> = {
   cosmos: "ATOMUSDT",
   stellar: "XLMUSDT",
   filecoin: "FILUSDT",
+  hyperliquid: "HYPEUSDT",
+  sui: "SUIUSDT",
 };
 
 export function symbolForToken(tokenId: string): string | null {
