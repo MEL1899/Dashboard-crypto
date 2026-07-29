@@ -9,6 +9,7 @@ import type {
   WalletTransaction,
 } from "../types";
 import type { WalletSnapshot } from "./etherscan";
+import { calcRSI } from "./indicators";
 
 // Deterministic PRNG so demo mode looks the same across reloads/screenshots.
 function mulberry32(seed: number) {
@@ -22,6 +23,9 @@ function mulberry32(seed: number) {
   };
 }
 
+// Kept in sync with BINANCE_SPOT_SYMBOL (lib/binance.ts) — any token real
+// data can resolve to a live exchange feed for should also get a plausible
+// mock price here, not the unbounded synthetic fallback below.
 const MOCK_TOKEN_META: Record<
   string,
   { symbol: string; name: string; basePrice: number }
@@ -36,6 +40,15 @@ const MOCK_TOKEN_META: Record<
   "polygon-ecosystem-token": { symbol: "POL", name: "Polygon", basePrice: 0.55 },
   chainlink: { symbol: "LINK", name: "Chainlink", basePrice: 14.5 },
   "avalanche-2": { symbol: "AVAX", name: "Avalanche", basePrice: 35 },
+  tron: { symbol: "TRX", name: "TRON", basePrice: 0.12 },
+  litecoin: { symbol: "LTC", name: "Litecoin", basePrice: 85 },
+  polkadot: { symbol: "DOT", name: "Polkadot", basePrice: 6.5 },
+  uniswap: { symbol: "UNI", name: "Uniswap", basePrice: 9 },
+  near: { symbol: "NEAR", name: "NEAR Protocol", basePrice: 5 },
+  "shiba-inu": { symbol: "SHIB", name: "Shiba Inu", basePrice: 0.000018 },
+  cosmos: { symbol: "ATOM", name: "Cosmos", basePrice: 7 },
+  stellar: { symbol: "XLM", name: "Stellar", basePrice: 0.11 },
+  filecoin: { symbol: "FIL", name: "Filecoin", basePrice: 5 },
 };
 
 function seedFromString(id: string): number {
@@ -126,21 +139,22 @@ export function mockCandles(tokenId: string, timeframe: Timeframe): Candle[] {
 }
 
 /**
- * Mocked per-timeframe RSI, shared by the watchlist table and the detail
- * panel's "other timeframes" line — until RSI is actually computed for
- * every timeframe of every watchlist token (today it's only computed for
- * whichever token/timeframe combination has its chart open).
+ * Mocked per-timeframe RSI, used as a fallback whenever the real per-token
+ * fetch (useWatchlistRsi) fails, and by the watchlist table/highlights
+ * before real data has resolved. Computed with the real calcRSI off the
+ * same mockCandles used for the chart itself, so if a token's chart also
+ * happens to be in fallback mode, its "RSI 1D" here and the score card's
+ * active-timeframe RSI agree instead of coming from two unrelated PRNGs.
  */
 export function mockRsiByTimeframe(tokenId: string): { "1h": number; "4h": number; "1d": number } {
-  const seed = seedFromString(tokenId);
-  const rand = (offset: number) => {
-    const x = Math.sin(seed + offset) * 10000;
-    return x - Math.floor(x);
+  const rsiForTimeframe = (timeframe: Timeframe): number => {
+    const series = calcRSI(mockCandles(tokenId, timeframe));
+    return series.length > 0 ? Math.round(series[series.length - 1].value) : 50;
   };
   return {
-    "1h": Math.round(15 + rand(1) * 70),
-    "4h": Math.round(15 + rand(2) * 70),
-    "1d": Math.round(15 + rand(3) * 70),
+    "1h": rsiForTimeframe("1h"),
+    "4h": rsiForTimeframe("4h"),
+    "1d": rsiForTimeframe("1d"),
   };
 }
 
