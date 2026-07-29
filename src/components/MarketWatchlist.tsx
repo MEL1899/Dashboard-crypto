@@ -15,6 +15,100 @@ const COLUMNS: { key: SortKey; label: string }[] = [
 
 const BIG_MOVE_THRESHOLD = 8;
 
+// Mocked per-timeframe RSI until it's actually computed for the whole
+// watchlist (today RSI only exists for whichever token's chart is open, and
+// only for its currently selected timeframe) — deterministic per token id
+// so it doesn't jump around between renders.
+function seedFromString(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return h;
+}
+
+function mockRsi(tokenId: string): { "1h": number; "4h": number; "1d": number } {
+  const seed = seedFromString(tokenId);
+  const rand = (offset: number) => {
+    const x = Math.sin(seed + offset) * 10000;
+    return x - Math.floor(x);
+  };
+  return {
+    "1h": Math.round(15 + rand(1) * 70),
+    "4h": Math.round(15 + rand(2) * 70),
+    "1d": Math.round(15 + rand(3) * 70),
+  };
+}
+
+type Tone = "up" | "down" | "neutral";
+
+function rsiTone(value: number): Tone {
+  if (value < 30) return "up";
+  if (value > 70) return "down";
+  return "neutral";
+}
+
+const PILL_STYLES: Record<Tone, string> = {
+  up: "border-[var(--color-up)] bg-[var(--color-up)]/15 text-[var(--color-up)]",
+  down: "border-[var(--color-down)] bg-[var(--color-down)]/15 text-[var(--color-down)]",
+  neutral: "border-[var(--color-border)] bg-white/5 text-[var(--color-text-dim)]",
+};
+
+function RsiPill({ value }: { value: number }) {
+  return (
+    <span
+      className={clsx(
+        "num-mono inline-flex min-w-9 items-center justify-center rounded-full border px-1.5 py-0.5 text-xs font-medium",
+        PILL_STYLES[rsiTone(value)],
+      )}
+    >
+      {value}
+    </span>
+  );
+}
+
+type SignalLevel = "strongBuy" | "buy" | "neutral" | "sell" | "strongSell";
+
+const SIGNAL_META: Record<SignalLevel, { label: string; tone: Tone; strong: boolean }> = {
+  strongBuy: { label: "Compra Forte", tone: "up", strong: true },
+  buy: { label: "Compra", tone: "up", strong: false },
+  neutral: { label: "Neutro", tone: "neutral", strong: false },
+  sell: { label: "Venda", tone: "down", strong: false },
+  strongSell: { label: "Venda Forte", tone: "down", strong: true },
+};
+
+/** Aggregates the 3 timeframe RSIs into one technical read. */
+function classifySignal(rsi: { "1h": number; "4h": number; "1d": number }): SignalLevel {
+  const avg = (rsi["1h"] + rsi["4h"] + rsi["1d"]) / 3;
+  if (avg <= 30) return "strongBuy";
+  if (avg <= 45) return "buy";
+  if (avg < 55) return "neutral";
+  if (avg <= 70) return "sell";
+  return "strongSell";
+}
+
+function SignalBadge({ level }: { level: SignalLevel }) {
+  const meta = SIGNAL_META[level];
+  if (meta.tone === "neutral") {
+    return (
+      <span className="inline-flex items-center rounded-full bg-white/5 px-2.5 py-0.5 text-xs font-medium text-[var(--color-text-dim)]">
+        {meta.label}
+      </span>
+    );
+  }
+  const solid = meta.tone === "up" ? "#0ca30c" : "#d03b3b";
+  return (
+    <span
+      className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
+      style={
+        meta.strong
+          ? { backgroundColor: solid, color: "#fff" }
+          : { backgroundColor: `${solid}8c`, color: solid }
+      }
+    >
+      {meta.label}
+    </span>
+  );
+}
+
 interface MarketWatchlistProps {
   tokens: MarketToken[];
   selectedId: string | null;
@@ -54,7 +148,7 @@ export function MarketWatchlist({ tokens, selectedId, onSelect }: MarketWatchlis
       }
     >
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] text-left text-xs">
+        <table className="w-full min-w-[820px] text-left text-xs">
           <thead className="text-[var(--color-text-dim)]">
             <tr>
               <th className="py-1.5 pr-2 font-medium">Ativo</th>
@@ -70,11 +164,17 @@ export function MarketWatchlist({ tokens, selectedId, onSelect }: MarketWatchlis
                   </button>
                 </th>
               ))}
+              <th className="py-1.5 pr-2 text-center font-medium">RSI 1H</th>
+              <th className="py-1.5 pr-2 text-center font-medium">RSI 4H</th>
+              <th className="py-1.5 pr-2 text-center font-medium">RSI 1D</th>
+              <th className="py-1.5 pr-2 font-medium">Sinal</th>
             </tr>
           </thead>
           <tbody>
             {sorted.map((token) => {
               const isBigMove = Math.abs(token.change24h) >= BIG_MOVE_THRESHOLD;
+              const rsi = mockRsi(token.id);
+              const signal = classifySignal(rsi);
               return (
                 <tr
                   key={token.id}
@@ -111,6 +211,18 @@ export function MarketWatchlist({ tokens, selectedId, onSelect }: MarketWatchlis
                   </td>
                   <td className="num-mono py-1.5 pr-2 text-[var(--color-text-dim)]">
                     {formatUsd(token.volume24h)}
+                  </td>
+                  <td className="py-1.5 pr-2 text-center">
+                    <RsiPill value={rsi["1h"]} />
+                  </td>
+                  <td className="py-1.5 pr-2 text-center">
+                    <RsiPill value={rsi["4h"]} />
+                  </td>
+                  <td className="py-1.5 pr-2 text-center">
+                    <RsiPill value={rsi["1d"]} />
+                  </td>
+                  <td className="py-1.5 pr-2">
+                    <SignalBadge level={signal} />
                   </td>
                 </tr>
               );
