@@ -92,17 +92,30 @@ export function MarketOverview({
         </Card>
 
         <Card title="Bollinger Bands" className="col-span-2 md:col-span-1">
-          <div className="num-mono text-2xl font-semibold text-[var(--color-text)]">
-            {lastBb ? formatMoney(lastBb.middle, currency) : "-"}
+          <div className="flex items-center gap-4">
+            <div>
+              <div className="text-[10px] text-[var(--color-text-dim)]">Superior</div>
+              <div className="num-mono text-lg font-semibold text-[var(--color-down)]">
+                {lastBb ? formatMoney(lastBb.upper, currency) : "-"}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] text-[var(--color-text-dim)]">Inferior</div>
+              <div className="num-mono text-lg font-semibold text-[var(--color-up)]">
+                {lastBb ? formatMoney(lastBb.lower, currency) : "-"}
+              </div>
+            </div>
           </div>
           {lastBb && lastCandle && (
-            <Badge tone={bbTone}>
-              {bbSignal(lastCandle.close, lastBb) === "above-upper"
-                ? "Acima da banda superior"
-                : bbSignal(lastCandle.close, lastBb) === "below-lower"
-                  ? "Abaixo da banda inferior"
-                  : "Dentro das bandas"}
-            </Badge>
+            <div className="mt-1.5">
+              <Badge tone={bbTone}>
+                {bbSignal(lastCandle.close, lastBb) === "above-upper"
+                  ? "Acima da banda superior"
+                  : bbSignal(lastCandle.close, lastBb) === "below-lower"
+                    ? "Abaixo da banda inferior"
+                    : "Dentro das bandas"}
+              </Badge>
+            </div>
           )}
         </Card>
       </div>

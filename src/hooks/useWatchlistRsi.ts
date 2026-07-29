@@ -26,7 +26,9 @@ async function fetchOneRsi(
       ? await fetchKlines(symbol, timeframe)
       : await fetchCandlesForTimeframe(tokenId, timeframe, apiKey);
     const series = calcRSI(candles);
-    return series.length > 0 ? series[series.length - 1].value : null;
+    // Rounded here so every consumer (table pills, Score, confluence check)
+    // always sees a whole number, same as the mock fallback below already did.
+    return series.length > 0 ? Math.round(series[series.length - 1].value) : null;
   } catch {
     return null;
   }
