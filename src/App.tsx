@@ -5,6 +5,7 @@ import { useMarketData } from "./hooks/useMarketData";
 import { useWatchlistTokens } from "./hooks/useWatchlistTokens";
 import { useWallet } from "./hooks/useWallet";
 import { useTheme } from "./hooks/useTheme";
+import { useCurrency } from "./hooks/useCurrency";
 import { loadSettings, saveSettings } from "./lib/settings";
 import { MarketHighlights } from "./components/MarketHighlights";
 import { MarketOverview } from "./components/MarketOverview";
@@ -43,6 +44,7 @@ type Tab = "market" | "wallet";
 function App() {
   const [settings, setSettings] = useState(loadSettings());
   const { theme, toggleTheme } = useTheme();
+  const { currency, toggleCurrency } = useCurrency();
   const [tab, setTab] = useState<Tab>("market");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [watchlist, setWatchlist] = useState<string[]>(settings.watchlist);
@@ -129,6 +131,14 @@ function App() {
 
           <div className="flex items-center gap-2">
             <button
+              onClick={toggleCurrency}
+              aria-label={`Mudar para ${currency === "USD" ? "Real" : "Dólar"}`}
+              className="rounded-lg border border-[var(--color-border)] px-2.5 py-2 text-xs font-medium text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
+            >
+              {currency === "USD" ? "US$" : "R$"}
+            </button>
+
+            <button
               onClick={toggleTheme}
               aria-label={theme === "dark" ? "Mudar para tema claro" : "Mudar para tema escuro"}
               className="flex items-center justify-center rounded-lg border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
@@ -150,7 +160,7 @@ function App() {
       <main className="mx-auto max-w-6xl px-4 py-5">
         {tab === "market" ? (
           <div className="flex flex-col gap-4">
-            <MarketPanorama />
+            <MarketPanorama currency={currency} />
             <MarketHighlights />
 
             {watchlistTokens.isDemo && watchlist.length > 0 && (
@@ -168,6 +178,7 @@ function App() {
               onAdd={handleAddToken}
               onRemove={handleRemoveToken}
               apiKey={settings.coingeckoApiKey || undefined}
+              currency={currency}
             />
 
             {watchlist.length === 0 ? (
@@ -186,6 +197,7 @@ function App() {
                   tokens={watchlistTokens.tokens}
                   selectedId={tokenId}
                   onSelect={handleTokenSelect}
+                  currency={currency}
                 />
 
                 {tokenId && (
@@ -233,6 +245,7 @@ function App() {
                           candles={market.candles}
                           rsi={market.rsi}
                           bollinger={market.bollinger}
+                          currency={currency}
                         />
                         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
                           <Suspense fallback={<TabFallback />}>

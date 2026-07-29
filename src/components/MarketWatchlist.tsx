@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import clsx from "clsx";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import type { MarketToken } from "../types";
-import { Badge, Card, formatUsd } from "./common";
+import type { Currency } from "../lib/currency";
+import { Badge, Card, formatMoney } from "./common";
 
 type SortKey = "price" | "change24h" | "marketCap" | "volume24h";
 
@@ -113,9 +114,10 @@ interface MarketWatchlistProps {
   tokens: MarketToken[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  currency: Currency;
 }
 
-export function MarketWatchlist({ tokens, selectedId, onSelect }: MarketWatchlistProps) {
+export function MarketWatchlist({ tokens, selectedId, onSelect, currency }: MarketWatchlistProps) {
   const [sortKey, setSortKey] = useState<SortKey>("marketCap");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -188,7 +190,7 @@ export function MarketWatchlist({ tokens, selectedId, onSelect }: MarketWatchlis
                     {token.symbol}
                     <span className="ml-1.5 text-[var(--color-text-dim)]">{token.name}</span>
                   </td>
-                  <td className="num-mono py-1.5 pr-2">{formatUsd(token.price)}</td>
+                  <td className="num-mono py-1.5 pr-2">{formatMoney(token.price, currency)}</td>
                   <td className="py-1.5 pr-2">
                     <span className="flex items-center gap-1.5">
                       <span
@@ -207,10 +209,10 @@ export function MarketWatchlist({ tokens, selectedId, onSelect }: MarketWatchlis
                     </span>
                   </td>
                   <td className="num-mono py-1.5 pr-2 text-[var(--color-text-dim)]">
-                    {formatUsd(token.marketCap)}
+                    {formatMoney(token.marketCap, currency)}
                   </td>
                   <td className="num-mono py-1.5 pr-2 text-[var(--color-text-dim)]">
-                    {formatUsd(token.volume24h)}
+                    {formatMoney(token.volume24h, currency)}
                   </td>
                   <td className="py-1.5 pr-2 text-center">
                     <RsiPill value={rsi["1h"]} />

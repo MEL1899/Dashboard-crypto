@@ -3,7 +3,8 @@ import clsx from "clsx";
 import { Plus, Search, X } from "lucide-react";
 import type { MarketToken } from "../types";
 import { POPULAR_TOKENS, searchTokens, type TokenSearchResult } from "../lib/coingecko";
-import { formatUsd } from "./common";
+import type { Currency } from "../lib/currency";
+import { formatMoney } from "./common";
 
 interface TokenSelectorProps {
   tokens: MarketToken[];
@@ -12,6 +13,7 @@ interface TokenSelectorProps {
   onAdd: (id: string) => void;
   onRemove: (id: string) => void;
   apiKey?: string;
+  currency: Currency;
 }
 
 const SUGGESTIONS = POPULAR_TOKENS.slice(0, 6);
@@ -23,6 +25,7 @@ export function TokenSelector({
   onAdd,
   onRemove,
   apiKey,
+  currency,
 }: TokenSelectorProps) {
   const watchlistIds = new Set(tokens.map((t) => t.id));
 
@@ -41,7 +44,7 @@ export function TokenSelector({
           >
             <button onClick={() => onSelect(t.id)} className="flex items-center gap-2">
               <span className="font-medium">{t.symbol}</span>
-              <span className="num-mono text-xs opacity-70">{formatUsd(t.price)}</span>
+              <span className="num-mono text-xs opacity-70">{formatMoney(t.price, currency)}</span>
             </button>
             <button
               onClick={() => onRemove(t.id)}

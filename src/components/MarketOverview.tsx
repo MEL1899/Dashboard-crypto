@@ -1,15 +1,17 @@
 import type { BollingerBands, Candle, IndicatorPoint, MarketToken } from "../types";
 import { bbSignal, rsiSignal } from "../lib/indicators";
-import { Badge, Card, formatUsd } from "./common";
+import type { Currency } from "../lib/currency";
+import { Badge, Card, formatMoney } from "./common";
 
 interface MarketOverviewProps {
   token: MarketToken | undefined;
   candles: Candle[];
   rsi: IndicatorPoint[];
   bollinger: BollingerBands[];
+  currency: Currency;
 }
 
-export function MarketOverview({ token, candles, rsi, bollinger }: MarketOverviewProps) {
+export function MarketOverview({ token, candles, rsi, bollinger, currency }: MarketOverviewProps) {
   const lastCandle = candles[candles.length - 1];
   const lastRsi = rsi[rsi.length - 1];
   const lastBb = bollinger[bollinger.length - 1];
@@ -34,7 +36,7 @@ export function MarketOverview({ token, candles, rsi, bollinger }: MarketOvervie
     <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
       <Card title="Preço">
         <div className="num-mono text-2xl font-semibold text-[var(--color-text)]">
-          {token ? formatUsd(token.price) : "-"}
+          {token ? formatMoney(token.price, currency) : "-"}
         </div>
         {token && (
           <Badge tone={token.change24h >= 0 ? "up" : "down"}>
@@ -45,10 +47,10 @@ export function MarketOverview({ token, candles, rsi, bollinger }: MarketOvervie
 
       <Card title="Market Cap">
         <div className="num-mono text-2xl font-semibold text-[var(--color-text)]">
-          {token ? formatUsd(token.marketCap) : "-"}
+          {token ? formatMoney(token.marketCap, currency) : "-"}
         </div>
         <span className="text-xs text-[var(--color-text-dim)]">
-          Vol 24h: {token ? formatUsd(token.volume24h) : "-"}
+          Vol 24h: {token ? formatMoney(token.volume24h, currency) : "-"}
         </span>
       </Card>
 
@@ -69,7 +71,7 @@ export function MarketOverview({ token, candles, rsi, bollinger }: MarketOvervie
 
       <Card title="Bollinger Bands">
         <div className="num-mono text-2xl font-semibold text-[var(--color-text)]">
-          {lastBb ? formatUsd(lastBb.middle) : "-"}
+          {lastBb ? formatMoney(lastBb.middle, currency) : "-"}
         </div>
         {lastBb && lastCandle && (
           <Badge tone={bbTone}>

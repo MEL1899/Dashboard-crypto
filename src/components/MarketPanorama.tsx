@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Gauge, Globe, PieChart } from "lucide-react";
-import { Badge, Card, formatUsd } from "./common";
+import type { Currency } from "../lib/currency";
+import { Badge, Card, formatMoney } from "./common";
 
 // Mocked until a real aggregate-market endpoint (global market cap, BTC
 // dominance, Fear & Greed) is wired up — presentation only for now.
@@ -47,7 +48,7 @@ function Tile({
   );
 }
 
-export function MarketPanorama() {
+export function MarketPanorama({ currency }: { currency: Currency }) {
   const p = MOCK_PANORAMA;
 
   return (
@@ -55,7 +56,7 @@ export function MarketPanorama() {
       <Tile
         icon={<Globe size={18} />}
         label="Market Cap Total"
-        value={formatUsd(p.totalMarketCap)}
+        value={formatMoney(p.totalMarketCap, currency)}
         action={
           <Badge tone={p.totalMarketCapChange24h >= 0 ? "up" : "down"}>
             {p.totalMarketCapChange24h >= 0 ? "▲" : "▼"}{" "}

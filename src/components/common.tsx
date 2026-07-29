@@ -1,5 +1,6 @@
 import type { PropsWithChildren, ReactNode } from "react";
 import clsx from "clsx";
+import { MOCK_USD_TO_BRL_RATE, type Currency } from "../lib/currency";
 
 export function Card({
   children,
@@ -65,6 +66,19 @@ export function formatUsd(value: number): string {
   if (Math.abs(value) >= 1_000) return `$${(value / 1_000).toFixed(2)}K`;
   if (Math.abs(value) < 1) return `$${value.toFixed(4)}`;
   return `$${value.toFixed(2)}`;
+}
+
+/** Like formatUsd, but currency-aware (USD or a mocked BRL conversion). */
+export function formatMoney(value: number, currency: Currency): string {
+  if (!Number.isFinite(value)) return "-";
+  const converted = currency === "BRL" ? value * MOCK_USD_TO_BRL_RATE : value;
+  const symbol = currency === "BRL" ? "R$" : "$";
+  const abs = Math.abs(converted);
+  if (abs >= 1_000_000_000) return `${symbol}${(converted / 1_000_000_000).toFixed(2)}B`;
+  if (abs >= 1_000_000) return `${symbol}${(converted / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `${symbol}${(converted / 1_000).toFixed(2)}K`;
+  if (abs < 1) return `${symbol}${converted.toFixed(4)}`;
+  return `${symbol}${converted.toFixed(2)}`;
 }
 
 export function formatNumber(value: number, digits = 4): string {
