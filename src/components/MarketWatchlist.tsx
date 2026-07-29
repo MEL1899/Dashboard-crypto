@@ -61,6 +61,18 @@ function classifySignal(rsi: { "1h": number; "4h": number; "1d": number }): Scor
   return "strongSell";
 }
 
+/**
+ * A displayable 0-100 number alongside the badge above, same buy/high
+ * direction as lib/opportunityScore.ts (higher = more bullish), just
+ * derived from the mocked RSI average instead of RSI+MACD+Bollinger.
+ * Its bucket boundaries are picked to agree with classifySignal so the
+ * number and the badge next to it never contradict each other.
+ */
+function mockRowScore(rsi: { "1h": number; "4h": number; "1d": number }): number {
+  const avg = (rsi["1h"] + rsi["4h"] + rsi["1d"]) / 3;
+  return Math.round(100 - avg);
+}
+
 interface MarketWatchlistProps {
   tokens: MarketToken[];
   selectedId: string | null;
@@ -121,7 +133,7 @@ export function MarketWatchlist({ tokens, selectedId, onSelect, currency }: Mark
               <th className="py-1.5 pr-2 text-center font-medium">RSI 1H</th>
               <th className="py-1.5 pr-2 text-center font-medium">RSI 4H</th>
               <th className="py-1.5 pr-2 text-center font-medium">RSI 1D</th>
-              <th className="py-1.5 pr-2 font-medium">Sinal</th>
+              <th className="py-1.5 pr-2 font-medium">Score</th>
             </tr>
           </thead>
           <tbody>
@@ -129,6 +141,7 @@ export function MarketWatchlist({ tokens, selectedId, onSelect, currency }: Mark
               const isBigMove = Math.abs(token.change24h) >= BIG_MOVE_THRESHOLD;
               const rsi = mockRsiByTimeframe(token.id);
               const signal = classifySignal(rsi);
+              const score = mockRowScore(rsi);
               return (
                 <tr
                   key={token.id}
@@ -176,7 +189,10 @@ export function MarketWatchlist({ tokens, selectedId, onSelect, currency }: Mark
                     <RsiPill value={rsi["1d"]} />
                   </td>
                   <td className="py-1.5 pr-2">
-                    <ScoreBadge level={signal} />
+                    <span className="flex items-center gap-1.5">
+                      <span className="num-mono text-[var(--color-text-dim)]">{score}</span>
+                      <ScoreBadge level={signal} />
+                    </span>
                   </td>
                 </tr>
               );
@@ -191,6 +207,7 @@ export function MarketWatchlist({ tokens, selectedId, onSelect, currency }: Mark
           const isBigMove = Math.abs(token.change24h) >= BIG_MOVE_THRESHOLD;
           const rsi = mockRsiByTimeframe(token.id);
           const signal = classifySignal(rsi);
+          const score = mockRowScore(rsi);
           return (
             <button
               key={token.id}
@@ -207,7 +224,10 @@ export function MarketWatchlist({ tokens, selectedId, onSelect, currency }: Mark
                   <span className="font-medium text-[var(--color-text)]">{token.symbol}</span>
                   <span className="ml-1.5 text-xs text-[var(--color-text-dim)]">{token.name}</span>
                 </div>
-                <ScoreBadge level={signal} />
+                <span className="flex items-center gap-1.5">
+                  <span className="num-mono text-xs text-[var(--color-text-dim)]">{score}</span>
+                  <ScoreBadge level={signal} />
+                </span>
               </div>
 
               <div className="flex items-center justify-between gap-2">
