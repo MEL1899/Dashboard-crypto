@@ -149,7 +149,8 @@ export function MarketWatchlist({ tokens, selectedId, onSelect, currency }: Mark
         ) : undefined
       }
     >
-      <div className="overflow-x-auto">
+      {/* Desktop/tablet: full table. Mobile: stacked cards (below). */}
+      <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[820px] text-left text-xs">
           <thead className="text-[var(--color-text-dim)]">
             <tr>
@@ -231,6 +232,71 @@ export function MarketWatchlist({ tokens, selectedId, onSelect, currency }: Mark
             })}
           </tbody>
         </table>
+      </div>
+
+      {/* Mobile: one card per coin instead of a horizontally-scrolling table. */}
+      <div className="flex flex-col gap-2 md:hidden">
+        {sorted.map((token) => {
+          const isBigMove = Math.abs(token.change24h) >= BIG_MOVE_THRESHOLD;
+          const rsi = mockRsi(token.id);
+          const signal = classifySignal(rsi);
+          return (
+            <button
+              key={token.id}
+              onClick={() => onSelect(token.id)}
+              className={clsx(
+                "flex flex-col gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                token.id === selectedId
+                  ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10"
+                  : "border-[var(--color-border)] hover:bg-white/5",
+              )}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm">
+                  <span className="font-medium text-[var(--color-text)]">{token.symbol}</span>
+                  <span className="ml-1.5 text-xs text-[var(--color-text-dim)]">{token.name}</span>
+                </div>
+                <SignalBadge level={signal} />
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <span className="num-mono text-base font-semibold text-[var(--color-text)]">
+                  {formatMoney(token.price, currency)}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className={clsx(
+                      "num-mono text-xs",
+                      token.change24h >= 0 ? "text-[var(--color-up)]" : "text-[var(--color-down)]",
+                    )}
+                  >
+                    {token.change24h >= 0 ? "▲" : "▼"} {Math.abs(token.change24h).toFixed(2)}%
+                  </span>
+                  {isBigMove && (
+                    <Badge tone={token.change24h >= 0 ? "up" : "down"}>forte</Badge>
+                  )}
+                </span>
+              </div>
+
+              <div className="num-mono flex items-center justify-between text-xs text-[var(--color-text-dim)]">
+                <span>MCap {formatMoney(token.marketCap, currency)}</span>
+                <span>Vol {formatMoney(token.volume24h, currency)}</span>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span className="flex items-center gap-1 text-[10px] text-[var(--color-text-dim)]">
+                  1H <RsiPill value={rsi["1h"]} />
+                </span>
+                <span className="flex items-center gap-1 text-[10px] text-[var(--color-text-dim)]">
+                  4H <RsiPill value={rsi["4h"]} />
+                </span>
+                <span className="flex items-center gap-1 text-[10px] text-[var(--color-text-dim)]">
+                  1D <RsiPill value={rsi["1d"]} />
+                </span>
+              </div>
+            </button>
+          );
+        })}
       </div>
     </Card>
   );
