@@ -1,17 +1,9 @@
 import type { ReactNode } from "react";
 import { Gauge, Globe, PieChart } from "lucide-react";
 import type { Currency } from "../lib/currency";
+import type { MarketPanoramaData } from "../hooks/useMarketPanorama";
+import { fearGreedLabel } from "../lib/fearGreed";
 import { Badge, Card, formatMoney } from "./common";
-
-// Mocked until a real aggregate-market endpoint (global market cap, BTC
-// dominance, Fear & Greed) is wired up — presentation only for now.
-const MOCK_PANORAMA = {
-  totalMarketCap: 2_450_000_000_000,
-  totalMarketCapChange24h: 1.8,
-  btcDominance: 54.2,
-  fearGreedValue: 42,
-  fearGreedLabel: "Medo",
-};
 
 function fearGreedTone(value: number): "up" | "down" | "neutral" {
   if (value <= 24) return "down";
@@ -48,32 +40,34 @@ function Tile({
   );
 }
 
-export function MarketPanorama({ currency }: { currency: Currency }) {
-  const p = MOCK_PANORAMA;
-
+export function MarketPanorama({ currency, data }: { currency: Currency; data: MarketPanoramaData }) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
       <Tile
         icon={<Globe size={18} />}
         label="Market Cap Total"
-        value={formatMoney(p.totalMarketCap, currency)}
+        value={formatMoney(data.totalMarketCap, currency)}
         action={
-          <Badge tone={p.totalMarketCapChange24h >= 0 ? "up" : "down"}>
-            {p.totalMarketCapChange24h >= 0 ? "▲" : "▼"}{" "}
-            {Math.abs(p.totalMarketCapChange24h).toFixed(1)}%
+          <Badge tone={data.totalMarketCapChange24h >= 0 ? "up" : "down"}>
+            {data.totalMarketCapChange24h >= 0 ? "▲" : "▼"}{" "}
+            {Math.abs(data.totalMarketCapChange24h).toFixed(1)}%
           </Badge>
         }
       />
       <Tile
         icon={<PieChart size={18} />}
         label="Dominância do BTC"
-        value={`${p.btcDominance.toFixed(1)}%`}
+        value={`${data.btcDominance.toFixed(1)}%`}
       />
       <Tile
         icon={<Gauge size={18} />}
         label="Fear & Greed Index"
-        value={String(p.fearGreedValue)}
-        action={<Badge tone={fearGreedTone(p.fearGreedValue)}>{p.fearGreedLabel}</Badge>}
+        value={String(data.fearGreedValue)}
+        action={
+          <Badge tone={fearGreedTone(data.fearGreedValue)}>
+            {fearGreedLabel(data.fearGreedValue)}
+          </Badge>
+        }
       />
     </div>
   );

@@ -66,6 +66,31 @@ export async function fetchMarketTokens(
   }));
 }
 
+export interface GlobalMarketData {
+  totalMarketCap: number;
+  totalMarketCapChange24h: number;
+  btcDominance: number;
+}
+
+interface CoinGeckoGlobalResponse {
+  data: {
+    total_market_cap: { usd: number };
+    market_cap_change_percentage_24h_usd: number;
+    market_cap_percentage: { btc: number };
+  };
+}
+
+/** Free, no-key aggregate endpoint: total market cap, its 24h change, and BTC dominance. */
+export async function fetchGlobalMarketData(apiKey?: string): Promise<GlobalMarketData> {
+  const url = withKey(new URL(`${BASE}/global`), apiKey);
+  const { data } = await getJson<CoinGeckoGlobalResponse>(url);
+  return {
+    totalMarketCap: data.total_market_cap.usd,
+    totalMarketCapChange24h: data.market_cap_change_percentage_24h_usd,
+    btcDominance: data.market_cap_percentage.btc,
+  };
+}
+
 export interface TokenSearchResult {
   id: string;
   symbol: string;

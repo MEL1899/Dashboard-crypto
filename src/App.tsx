@@ -4,6 +4,7 @@ import { LayoutDashboard, Moon, Settings, Sun, Wallet, X } from "lucide-react";
 import { useMarketData } from "./hooks/useMarketData";
 import { useWatchlistTokens } from "./hooks/useWatchlistTokens";
 import { useWatchlistRsi } from "./hooks/useWatchlistRsi";
+import { useMarketPanorama } from "./hooks/useMarketPanorama";
 import { useWallet } from "./hooks/useWallet";
 import { useTheme } from "./hooks/useTheme";
 import { useCurrency } from "./hooks/useCurrency";
@@ -59,6 +60,7 @@ function App() {
 
   const watchlistTokens = useWatchlistTokens(watchlist, settings.coingeckoApiKey || undefined);
   const rsiByToken = useWatchlistRsi(watchlist, settings.coingeckoApiKey || undefined);
+  const panorama = useMarketPanorama(settings.coingeckoApiKey || undefined);
   const market = useMarketData(tokenId, timeframe, settings.coingeckoApiKey || undefined);
   const wallet = useWallet(walletQuery.address, walletQuery.chain, settings.etherscanApiKey);
 
@@ -171,7 +173,13 @@ function App() {
       <main className="mx-auto max-w-6xl px-4 py-5">
         {tab === "market" ? (
           <div className="flex flex-col gap-4">
-            <MarketPanorama currency={currency} />
+            <MarketPanorama currency={currency} data={panorama.data} />
+            {panorama.isDemo && (
+              <div className="rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-3 py-2 text-xs text-[var(--color-text)]">
+                Modo demonstração: não foi possível carregar o panorama de mercado agora
+                {panorama.error ? ` (${panorama.error})` : ""}. Exibindo dados simulados.
+              </div>
+            )}
             <MarketHighlights tokens={watchlistTokens.tokens} rsiByToken={rsiByToken} />
 
             {watchlistTokens.isDemo && watchlist.length > 0 && (
