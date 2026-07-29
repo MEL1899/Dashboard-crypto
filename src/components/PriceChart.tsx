@@ -85,7 +85,11 @@ export function PriceChart({ candles, bollinger, rsi, volume, theme }: PriceChar
           lineWidth: 1,
           lineStyle: key === "middle" ? 2 : 0,
           crosshairMarkerVisible: false,
-          lastValueVisible: false,
+          // Current upper/lower band values shown on the right axis, in
+          // their own colors, so they read the same way the live price and
+          // RSI badges already do. Middle (the SMA) stays off the axis,
+          // matching the detail card's Bollinger Bands display above.
+          lastValueVisible: key !== "middle",
           priceLineVisible: false,
         },
         0,
