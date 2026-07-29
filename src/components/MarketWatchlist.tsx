@@ -17,7 +17,7 @@ const BIG_MOVE_THRESHOLD = 8;
 
 interface MarketWatchlistProps {
   tokens: MarketToken[];
-  selectedId: string;
+  selectedId: string | null;
   onSelect: (id: string) => void;
 }
 

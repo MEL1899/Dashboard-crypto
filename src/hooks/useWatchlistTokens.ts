@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { fetchTickers, symbolForToken } from "../lib/binance";
 import { fetchMarketTokens } from "../lib/coingecko";
 import { mockMarketTokens } from "../lib/mock";
 import type { MarketToken } from "../types";
@@ -8,6 +9,34 @@ interface WatchlistTokensState {
   isDemo: boolean;
   error: string | null;
   tokens: MarketToken[];
+}
+
+/**
+ * CoinGecko supplies market cap/name/image; wherever a token also has a
+ * Binance pair, its price/24h-change/volume get overridden by the live
+ * Binance ticker instead — that's the same source the chart uses for that
+ * token, so the two can never disagree.
+ */
+async function withBinancePrices(tokens: MarketToken[]): Promise<MarketToken[]> {
+  const symbolByTokenId = new Map<string, string>();
+  for (const t of tokens) {
+    const symbol = symbolForToken(t.id);
+    if (symbol) symbolByTokenId.set(t.id, symbol);
+  }
+  if (symbolByTokenId.size === 0) return tokens;
+
+  try {
+    const tickers = await fetchTickers([...symbolByTokenId.values()]);
+    return tokens.map((t) => {
+      const symbol = symbolByTokenId.get(t.id);
+      const ticker = symbol ? tickers[symbol] : undefined;
+      if (!ticker) return t;
+      return { ...t, price: ticker.price, change24h: ticker.change24h, volume24h: ticker.volume24h };
+    });
+  } catch {
+    // Binance cross-check failed; CoinGecko's own numbers are still fine.
+    return tokens;
+  }
 }
 
 export function useWatchlistTokens(ids: string[], apiKey?: string) {
@@ -35,7 +64,7 @@ export function useWatchlistTokens(ids: string[], apiKey?: string) {
 
     async function load() {
       try {
-        const tokens = await fetchMarketTokens(currentIds, apiKey);
+        const tokens = await withBinancePrices(await fetchMarketTokens(currentIds, apiKey));
         if (cancelled) return;
         setState({ loading: false, isDemo: false, error: null, tokens });
       } catch (err) {

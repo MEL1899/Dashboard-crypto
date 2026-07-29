@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { fetchKlines, symbolForToken } from "../lib/binance";
 import { fetchCandlesForTimeframe } from "../lib/coingecko";
 import { mockCandles } from "../lib/mock";
 import { calcBollingerBands, calcRSI, calcVolumeSeries } from "../lib/indicators";
@@ -39,7 +40,10 @@ export function useMarketData(tokenId: string | null, timeframe: Timeframe, apiK
     async function load() {
       if (!tokenId) return;
       try {
-        const candles = await fetchCandlesForTimeframe(tokenId, timeframe, apiKey);
+        const symbol = symbolForToken(tokenId);
+        const candles = symbol
+          ? await fetchKlines(symbol, timeframe)
+          : await fetchCandlesForTimeframe(tokenId, timeframe, apiKey);
         if (cancelled) return;
         setState({
           loading: false,

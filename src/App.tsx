@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, type ReactNode } from "react";
 import clsx from "clsx";
-import { LayoutDashboard, Settings, Wallet } from "lucide-react";
+import { LayoutDashboard, Settings, Wallet, X } from "lucide-react";
 import { useMarketData } from "./hooks/useMarketData";
 import { useWatchlistTokens } from "./hooks/useWatchlistTokens";
 import { useWallet } from "./hooks/useWallet";
@@ -74,15 +74,19 @@ function App() {
     if (watchlist.includes(id)) return;
     const nextWatchlist = [...watchlist, id];
     setWatchlist(nextWatchlist);
-    const nextTokenId = tokenId ?? id;
-    setTokenId(nextTokenId);
-    persist({ ...settings, watchlist: nextWatchlist, selectedTokenId: nextTokenId });
+    persist({ ...settings, watchlist: nextWatchlist });
+  }
+
+  function handleCloseChart() {
+    setTokenId(null);
+    persist({ ...settings, selectedTokenId: "" });
   }
 
   function handleRemoveToken(id: string) {
     const nextWatchlist = watchlist.filter((w) => w !== id);
     setWatchlist(nextWatchlist);
-    const nextTokenId = tokenId === id ? (nextWatchlist[0] ?? null) : tokenId;
+    // Removing the token whose chart is open just closes the chart.
+    const nextTokenId = tokenId === id ? null : tokenId;
     setTokenId(nextTokenId);
     persist({ ...settings, watchlist: nextWatchlist, selectedTokenId: nextTokenId ?? "" });
   }
@@ -140,34 +144,14 @@ function App() {
               </div>
             )}
 
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <TokenSelector
-                tokens={watchlistTokens.tokens}
-                selectedId={tokenId}
-                onSelect={handleTokenSelect}
-                onAdd={handleAddToken}
-                onRemove={handleRemoveToken}
-                apiKey={settings.coingeckoApiKey || undefined}
-              />
-              {watchlist.length > 0 && (
-                <div className="flex items-center gap-1 rounded-lg border border-[var(--color-border)] p-1">
-                  {TIMEFRAME_OPTIONS.map((t) => (
-                    <button
-                      key={t.value}
-                      onClick={() => handleTimeframeSelect(t.value)}
-                      className={clsx(
-                        "rounded-md px-2.5 py-1 text-xs",
-                        timeframe === t.value
-                          ? "bg-[var(--color-accent)] text-white"
-                          : "text-[var(--color-text-dim)] hover:text-[var(--color-text)]",
-                      )}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <TokenSelector
+              tokens={watchlistTokens.tokens}
+              selectedId={tokenId}
+              onSelect={handleTokenSelect}
+              onAdd={handleAddToken}
+              onRemove={handleRemoveToken}
+              apiKey={settings.coingeckoApiKey || undefined}
+            />
 
             {watchlist.length === 0 ? (
               <div className="flex flex-col items-center gap-1 rounded-xl border border-dashed border-[var(--color-border)] py-16 text-center">
@@ -179,38 +163,74 @@ function App() {
                   acompanhar.
                 </p>
               </div>
-            ) : market.loading || !tokenId ? (
-              <div className="flex h-96 items-center justify-center">
-                <Spinner />
-              </div>
             ) : (
               <>
-                {market.isDemo && (
-                  <div className="rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-3 py-2 text-xs text-[var(--color-text)]">
-                    Modo demonstração para o gráfico: {market.error}. Exibindo candles simulados.
-                  </div>
-                )}
-                <MarketOverview
-                  token={selectedToken}
-                  candles={market.candles}
-                  rsi={market.rsi}
-                  bollinger={market.bollinger}
-                />
-                <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
-                  <Suspense fallback={<TabFallback />}>
-                    <PriceChart
-                      candles={market.candles}
-                      bollinger={market.bollinger}
-                      rsi={market.rsi}
-                      volume={market.volume}
-                    />
-                  </Suspense>
-                </div>
                 <MarketWatchlist
                   tokens={watchlistTokens.tokens}
                   selectedId={tokenId}
                   onSelect={handleTokenSelect}
                 />
+
+                {tokenId && (
+                  <div className="flex flex-col gap-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-1 rounded-lg border border-[var(--color-border)] p-1">
+                        {TIMEFRAME_OPTIONS.map((t) => (
+                          <button
+                            key={t.value}
+                            onClick={() => handleTimeframeSelect(t.value)}
+                            className={clsx(
+                              "rounded-md px-2.5 py-1 text-xs",
+                              timeframe === t.value
+                                ? "bg-[var(--color-accent)] text-white"
+                                : "text-[var(--color-text-dim)] hover:text-[var(--color-text)]",
+                            )}
+                          >
+                            {t.label}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        onClick={handleCloseChart}
+                        className="flex items-center gap-1 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-xs text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
+                      >
+                        <X size={13} />
+                        Fechar gráfico
+                      </button>
+                    </div>
+
+                    {market.loading ? (
+                      <div className="flex h-96 items-center justify-center">
+                        <Spinner />
+                      </div>
+                    ) : (
+                      <>
+                        {market.isDemo && (
+                          <div className="rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-3 py-2 text-xs text-[var(--color-text)]">
+                            Modo demonstração para o gráfico: {market.error}. Exibindo candles
+                            simulados.
+                          </div>
+                        )}
+                        <MarketOverview
+                          token={selectedToken}
+                          candles={market.candles}
+                          rsi={market.rsi}
+                          bollinger={market.bollinger}
+                        />
+                        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+                          <Suspense fallback={<TabFallback />}>
+                            <PriceChart
+                              candles={market.candles}
+                              bollinger={market.bollinger}
+                              rsi={market.rsi}
+                              volume={market.volume}
+                            />
+                          </Suspense>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>

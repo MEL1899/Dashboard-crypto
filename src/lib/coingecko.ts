@@ -84,64 +84,15 @@ export async function searchTokens(
   return data.coins.slice(0, 8);
 }
 
-type OhlcRow = [number, number, number, number, number]; // ts, o, h, l, c
 type ChartSeries = [number, number][]; // ts, value
-
-export async function fetchCandles(
-  tokenId: string,
-  days: number,
-  apiKey?: string,
-): Promise<Candle[]> {
-  const ohlcUrl = withKey(new URL(`${BASE}/coins/${tokenId}/ohlc`), apiKey);
-  ohlcUrl.searchParams.set("vs_currency", "usd");
-  ohlcUrl.searchParams.set("days", String(days));
-
-  const chartUrl = withKey(
-    new URL(`${BASE}/coins/${tokenId}/market_chart`),
-    apiKey,
-  );
-  chartUrl.searchParams.set("vs_currency", "usd");
-  chartUrl.searchParams.set("days", String(days));
-
-  const [ohlc, chart] = await Promise.all([
-    getJson<OhlcRow[]>(ohlcUrl),
-    getJson<{ total_volumes: ChartSeries }>(chartUrl),
-  ]);
-
-  const volumes = chart.total_volumes ?? [];
-
-  return ohlc.map(([ts, open, high, low, close]) => {
-    const volume = closestVolume(volumes, ts);
-    return {
-      time: Math.floor(ts / 1000),
-      open,
-      high,
-      low,
-      close,
-      volume,
-    };
-  });
-}
-
-function closestVolume(series: ChartSeries, targetTs: number): number {
-  if (series.length === 0) return 0;
-  let best = series[0];
-  let bestDiff = Math.abs(series[0][0] - targetTs);
-  for (const point of series) {
-    const diff = Math.abs(point[0] - targetTs);
-    if (diff < bestDiff) {
-      best = point;
-      bestDiff = diff;
-    }
-  }
-  return best[1];
-}
 
 /**
  * CoinGecko's free OHLC endpoint auto-picks its own candle width from `days`
- * and can't be forced to 1h/4h. For those timeframes we instead pull the
- * raw price/volume series (auto-hourly for a 2-90 day window) and bucket it
- * into real OHLC candles ourselves.
+ * (e.g. 4-day buckets once `days` passes ~30), which made the "1D" chart's
+ * last candle up to 4 days stale compared to the live price shown elsewhere.
+ * So every timeframe instead pulls the raw price/volume series (auto-hourly
+ * for a 2-90 day window, daily beyond that) and gets bucketed into OHLC
+ * candles ourselves — always ending at the most recent data point.
  */
 function bucketToCandles(
   prices: ChartSeries,
@@ -195,10 +146,6 @@ export async function fetchCandlesForTimeframe(
   apiKey?: string,
 ): Promise<Candle[]> {
   const { lookbackDays, bucketSeconds } = TIMEFRAME_CONFIG[timeframe];
-
-  if (timeframe === "1d") {
-    return fetchCandles(tokenId, lookbackDays, apiKey);
-  }
 
   const chartUrl = withKey(new URL(`${BASE}/coins/${tokenId}/market_chart`), apiKey);
   chartUrl.searchParams.set("vs_currency", "usd");

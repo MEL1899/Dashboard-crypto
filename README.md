@@ -10,7 +10,8 @@ Passo 1 do plano: validar tudo na web. Depois de ajustado, o mesmo código vira 
 - **Tailwind CSS v4** para o layout
 - **lightweight-charts** (candlestick + BB + volume + RSI em painéis)
 - **recharts** (pizza de holdings, atividade por dia)
-- **CoinGecko API** (preço, market cap, OHLC/candles por timeframe) — funciona sem API key (rate limit menor); key demo opcional em Configurações
+- **Binance API** (spot, pública, sem key) — fonte primária de preço/candles para os principais ativos (BTC, ETH, SOL, etc.): mesma fonte alimenta o card de preço, a tabela e o gráfico, então nunca ficam incoerentes entre si
+- **CoinGecko API** (preço, market cap, OHLC/candles por timeframe) — enriquece com market cap/nome/imagem e cobre ativos fora da Binance; funciona sem API key (rate limit menor), key demo opcional em Configurações
 - **Etherscan V2 API** (unificada multi-chain: Ethereum, BNB Chain, Polygon, Arbitrum, Base) para dados de carteira — precisa de uma API key gratuita em [etherscan.io/apis](https://etherscan.io/apis)
 - **DeFiLlama API** (TVL por chain) — sem API key
 
@@ -35,7 +36,7 @@ As chaves ficam salvas só no `localStorage` do navegador.
 
 ## Funcionalidades
 
-- **Mercado**: watchlist própria (começa vazia, você busca e adiciona os ativos que quer acompanhar), timeframes reais 1H/4H/1D, gráfico de candles com Bollinger Bands, RSI(14) e volume, cards de overview com sinais (sobrecomprado/sobrevendido, dentro/fora das bandas), tabela geral ordenável de todos os ativos da watchlist.
+- **Mercado**: watchlist própria (começa vazia, você busca e adiciona os ativos que quer acompanhar), tabela geral ordenável como visão principal — o gráfico só abre ao clicar num ativo, com timeframes reais 1H/4H/1D, candles com Bollinger Bands, RSI(14) e volume, cards de overview com sinais (sobrecomprado/sobrevendido, dentro/fora das bandas).
 - **Carteira**: input de endereço EVM + chain, TVL da chain (DeFiLlama), saldo nativo, holdings estimados (pizza), histórico de transações, insights de atividade (compras vs vendas, gas gasto, token mais movimentado, atividade por dia).
 
 ## Roadmap para APK
