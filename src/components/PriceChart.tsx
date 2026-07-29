@@ -48,11 +48,11 @@ export function PriceChart({ candles, bollinger, rsi, volume }: PriceChartProps)
     const candleSeries = chart.addSeries(
       CandlestickSeries,
       {
-        upColor: "#22c55e",
-        downColor: "#f43f5e",
+        upColor: "#0ca30c",
+        downColor: "#d03b3b",
         borderVisible: false,
-        wickUpColor: "#22c55e",
-        wickDownColor: "#f43f5e",
+        wickUpColor: "#0ca30c",
+        wickDownColor: "#d03b3b",
       },
       0,
     );
@@ -69,7 +69,7 @@ export function PriceChart({ candles, bollinger, rsi, volume }: PriceChartProps)
     // Upper band = dynamic resistance/overbought zone, lower band = dynamic
     // support/oversold zone — same red/green semantics used everywhere else
     // in this app (RSI, 24h change), not an arbitrary color choice.
-    const bbColor = { upper: "#f43f5e", middle: "#8b93a7", lower: "#22c55e" };
+    const bbColor = { upper: "#d03b3b", middle: "#8b93a7", lower: "#0ca30c" };
     for (const key of ["upper", "middle", "lower"] as const) {
       const series = chart.addSeries(
         LineSeries,
@@ -91,7 +91,7 @@ export function PriceChart({ candles, bollinger, rsi, volume }: PriceChartProps)
     // Pane 1: volume
     const volumeSeries = chart.addSeries(
       HistogramSeries,
-      { color: "#7c6cff80", priceFormat: { type: "volume" } },
+      { color: "#4f7cff80", priceFormat: { type: "volume" } },
       1,
     );
     volumeSeries.setData(

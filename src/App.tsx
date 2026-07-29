@@ -6,6 +6,7 @@ import { useWatchlistTokens } from "./hooks/useWatchlistTokens";
 import { useWallet } from "./hooks/useWallet";
 import { loadSettings, saveSettings } from "./lib/settings";
 import { MarketOverview } from "./components/MarketOverview";
+import { MarketPanorama } from "./components/MarketPanorama";
 import { MarketWatchlist } from "./components/MarketWatchlist";
 import { TokenSelector } from "./components/TokenSelector";
 import { SettingsModal } from "./components/SettingsModal";
@@ -136,6 +137,8 @@ function App() {
       <main className="mx-auto max-w-6xl px-4 py-5">
         {tab === "market" ? (
           <div className="flex flex-col gap-4">
+            <MarketPanorama />
+
             {watchlistTokens.isDemo && watchlist.length > 0 && (
               <div className="rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-3 py-2 text-xs text-[var(--color-text)]">
                 Modo demonstração: não foi possível carregar dados reais da CoinGecko agora
