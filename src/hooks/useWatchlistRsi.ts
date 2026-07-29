@@ -14,6 +14,7 @@ export interface TokenRsiByTimeframe {
 }
 
 const TIMEFRAMES: Timeframe[] = ["1h", "4h", "1d"];
+const RETRY_INTERVAL_MS = 60_000;
 
 async function fetchOneRsi(
   tokenId: string,
@@ -66,13 +67,6 @@ export function useWatchlistRsi(ids: string[], apiKey?: string) {
       return;
     }
 
-    // Only fetch tokens we don't already have — adding one token to an
-    // existing watchlist used to re-fetch RSI (3 requests each: 1h/4h/1d)
-    // for every other token already on it too, which could burst past
-    // CoinGecko's tight public rate limit and make the search/add flow
-    // fail right when you tried to add a coin.
-    const missingIds = currentIds.filter((id) => !(id in dataRef.current));
-
     // Drop entries for tokens no longer on the watchlist.
     setData((prev) => {
       const next: Record<string, TokenRsiByTimeframe> = {};
@@ -82,21 +76,33 @@ export function useWatchlistRsi(ids: string[], apiKey?: string) {
       return next;
     });
 
-    if (missingIds.length === 0) return;
-
     let cancelled = false;
 
-    async function load() {
+    async function loadMissing() {
+      // Only (re)fetch tokens without a *successful* real fetch yet — never
+      // re-request one that already has real data (that was the burst that
+      // could trip CoinGecko's rate limit when adding a coin), but do keep
+      // retrying ones still stuck on the mock fallback from a transient
+      // failure, so a token doesn't stay wrong for the rest of the session
+      // just because its first attempt happened to fail.
+      const idsToFetch = currentIds.filter((id) => {
+        const existing = dataRef.current[id];
+        return !existing || existing.isDemo;
+      });
+      if (idsToFetch.length === 0) return;
+
       const entries = await Promise.all(
-        missingIds.map(async (id) => [id, await fetchTokenRsi(id, apiKey)] as const),
+        idsToFetch.map(async (id) => [id, await fetchTokenRsi(id, apiKey)] as const),
       );
       if (cancelled) return;
       setData((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
     }
 
-    load();
+    loadMissing();
+    const retryTimer = setInterval(loadMissing, RETRY_INTERVAL_MS);
     return () => {
       cancelled = true;
+      clearInterval(retryTimer);
     };
   }, [key, apiKey]);
 
