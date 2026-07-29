@@ -6,7 +6,7 @@ import type { Currency } from "../lib/currency";
 import { mockRsiByTimeframe } from "../lib/mock";
 import type { TokenRsiByTimeframe } from "../hooks/useWatchlistRsi";
 import type { OpportunityScoreResult } from "../lib/opportunityScore";
-import { Badge, Card, ScoreBadge, type ScoreLevel, formatMoney } from "./common";
+import { Badge, Card, ScoreBadge, type ScoreLevel, formatMoney, formatPrice } from "./common";
 
 type SortKey = "price" | "change24h" | "marketCap" | "volume24h";
 
@@ -173,7 +173,7 @@ export function MarketWatchlist({
                     {token.symbol}
                     <span className="ml-1.5 text-[var(--color-text-dim)]">{token.name}</span>
                   </td>
-                  <td className="num-mono py-1.5 pr-2">{formatMoney(token.price, currency)}</td>
+                  <td className="num-mono py-1.5 pr-2">{formatPrice(token.price, currency)}</td>
                   <td className="py-1.5 pr-2">
                     <span className="flex items-center gap-1.5">
                       <span
@@ -245,7 +245,7 @@ export function MarketWatchlist({
 
               <div className="flex items-center justify-between gap-2">
                 <span className="num-mono text-base font-semibold text-[var(--color-text)]">
-                  {formatMoney(token.price, currency)}
+                  {formatPrice(token.price, currency)}
                 </span>
                 <span className="flex items-center gap-1.5">
                   <span

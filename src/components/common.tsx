@@ -125,17 +125,42 @@ export function formatUsd(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
-/** Like formatUsd, but currency-aware (USD or a mocked BRL conversion). */
+/**
+ * For aggregate figures (market cap, volume) where exact cents don't
+ * matter and abbreviating aids readability. Currency-aware (USD or a
+ * mocked BRL conversion). Don't use this for a per-coin price — see
+ * formatPrice below.
+ */
 export function formatMoney(value: number, currency: Currency): string {
   if (!Number.isFinite(value)) return "-";
   const converted = currency === "BRL" ? value * MOCK_USD_TO_BRL_RATE : value;
   const symbol = currency === "BRL" ? "R$" : "$";
   const abs = Math.abs(converted);
+  if (abs >= 1_000_000_000_000) return `${symbol}${(converted / 1_000_000_000_000).toFixed(2)}T`;
   if (abs >= 1_000_000_000) return `${symbol}${(converted / 1_000_000_000).toFixed(2)}B`;
   if (abs >= 1_000_000) return `${symbol}${(converted / 1_000_000).toFixed(2)}M`;
   if (abs >= 1_000) return `${symbol}${(converted / 1_000).toFixed(2)}K`;
   if (abs < 1) return `${symbol}${converted.toFixed(4)}`;
   return `${symbol}${converted.toFixed(2)}`;
+}
+
+/**
+ * For a per-coin price (or a price level like a Bollinger band) — never
+ * abbreviated to K/M/B, since that reads as a different number than the
+ * price someone would actually see quoted (e.g. $67,682.62, not $67.68K).
+ * Small-value tokens get more decimal places so they don't round to 0.
+ */
+export function formatPrice(value: number, currency: Currency): string {
+  if (!Number.isFinite(value)) return "-";
+  const converted = currency === "BRL" ? value * MOCK_USD_TO_BRL_RATE : value;
+  const symbol = currency === "BRL" ? "R$" : "$";
+  const abs = Math.abs(converted);
+  if (abs === 0) return `${symbol}0.00`;
+  if (abs < 1) return `${symbol}${converted.toFixed(abs < 0.01 ? 6 : 4)}`;
+  return `${symbol}${converted.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 export function formatNumber(value: number, digits = 4): string {

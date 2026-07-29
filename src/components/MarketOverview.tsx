@@ -3,7 +3,7 @@ import { bbSignal } from "../lib/indicators";
 import { computeOpportunityScoreFromMarket } from "../lib/opportunityScore";
 import type { TokenRsiByTimeframe } from "../hooks/useWatchlistRsi";
 import type { Currency } from "../lib/currency";
-import { Badge, Card, formatMoney, ScoreBadge } from "./common";
+import { Badge, Card, formatMoney, formatPrice, ScoreBadge } from "./common";
 
 const TIMEFRAME_LABEL: Record<Timeframe, string> = { "1h": "1H", "4h": "4H", "1d": "1D" };
 const TIMEFRAME_ORDER: Timeframe[] = ["1h", "4h", "1d"];
@@ -73,7 +73,7 @@ export function MarketOverview({
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         <Card title="Preço">
           <div className="num-mono text-2xl font-semibold text-[var(--color-text)]">
-            {token ? formatMoney(token.price, currency) : "-"}
+            {token ? formatPrice(token.price, currency) : "-"}
           </div>
           {token && (
             <Badge tone={token.change24h >= 0 ? "up" : "down"}>
@@ -96,13 +96,13 @@ export function MarketOverview({
             <div>
               <div className="text-[10px] text-[var(--color-text-dim)]">Superior</div>
               <div className="num-mono text-lg font-semibold text-[var(--color-down)]">
-                {lastBb ? formatMoney(lastBb.upper, currency) : "-"}
+                {lastBb ? formatPrice(lastBb.upper, currency) : "-"}
               </div>
             </div>
             <div>
               <div className="text-[10px] text-[var(--color-text-dim)]">Inferior</div>
               <div className="num-mono text-lg font-semibold text-[var(--color-up)]">
-                {lastBb ? formatMoney(lastBb.lower, currency) : "-"}
+                {lastBb ? formatPrice(lastBb.lower, currency) : "-"}
               </div>
             </div>
           </div>

@@ -4,7 +4,7 @@ import { Plus, Search, X } from "lucide-react";
 import type { MarketToken } from "../types";
 import { POPULAR_TOKENS, searchTokens, type TokenSearchResult } from "../lib/coingecko";
 import type { Currency } from "../lib/currency";
-import { formatMoney } from "./common";
+import { formatPrice } from "./common";
 
 interface TokenSelectorProps {
   tokens: MarketToken[];
@@ -44,7 +44,7 @@ export function TokenSelector({
           >
             <button onClick={() => onSelect(t.id)} className="flex items-center gap-2">
               <span className="font-medium">{t.symbol}</span>
-              <span className="num-mono text-xs opacity-70">{formatMoney(t.price, currency)}</span>
+              <span className="num-mono text-xs opacity-70">{formatPrice(t.price, currency)}</span>
             </button>
             <button
               onClick={() => onRemove(t.id)}
