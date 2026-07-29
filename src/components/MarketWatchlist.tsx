@@ -3,10 +3,8 @@ import clsx from "clsx";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import type { MarketToken } from "../types";
 import type { Currency } from "../lib/currency";
-import { mockRsiByTimeframe } from "../lib/mock";
-import type { TokenRsiByTimeframe } from "../hooks/useWatchlistRsi";
-import type { OpportunityScoreResult } from "../lib/opportunityScore";
-import { Badge, Card, ScoreBadge, type ScoreLevel, formatMoney, formatPrice } from "./common";
+import type { TokenSignals } from "../hooks/useWatchlistSignals";
+import { Badge, Card, ScoreBadge, formatMoney, formatPrice } from "./common";
 
 type SortKey = "price" | "change24h" | "marketCap" | "volume24h";
 
@@ -46,48 +44,21 @@ function RsiPill({ value }: { value: number }) {
   );
 }
 
-/**
- * Aggregates the 3 timeframe RSIs (real, via useWatchlistRsi — mock only as
- * a per-timeframe fallback if that fetch failed) into one technical read.
- * This is the table's own lightweight RSI-only classifier — the detail
- * panel's score (lib/opportunityScore.ts) is the fuller one, combining RSI +
- * MACD + Bollinger position for whichever token's chart is open. The table
- * doesn't have MACD/Bollinger per row, so it stays RSI-only.
- */
-function classifySignal(rsi: { "1h": number; "4h": number; "1d": number }): ScoreLevel {
-  const avg = (rsi["1h"] + rsi["4h"] + rsi["1d"]) / 3;
-  if (avg <= 30) return "strongBuy";
-  if (avg <= 45) return "buy";
-  if (avg < 55) return "neutral";
-  if (avg <= 70) return "sell";
-  return "strongSell";
-}
-
-/**
- * A displayable 0-100 number alongside the badge above, same buy/high
- * direction as lib/opportunityScore.ts (higher = more bullish), just
- * derived from the RSI average instead of RSI+MACD+Bollinger. Its bucket
- * boundaries are picked to agree with classifySignal so the number and the
- * badge next to it never contradict each other.
- */
-function rowScore(rsi: { "1h": number; "4h": number; "1d": number }): number {
-  const avg = (rsi["1h"] + rsi["4h"] + rsi["1d"]) / 3;
-  return Math.round(100 - avg);
-}
+const FALLBACK_SIGNALS: TokenSignals = {
+  rsiByTimeframe: { "1h": 50, "4h": 50, "1d": 50 },
+  score: { score: 50, level: "neutral", breakdown: [] },
+  isDemo: true,
+};
 
 interface MarketWatchlistProps {
   tokens: MarketToken[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   currency: Currency;
-  /** Real per-timeframe RSI per token, keyed by token id (see useWatchlistRsi).
-   * A token missing here just means its fetch hasn't resolved yet — the
-   * deterministic mock covers that gap until it does. */
-  rsiByToken: Record<string, TokenRsiByTimeframe>;
-  /** Real score (RSI+MACD+Bollinger) for whichever token's chart is open —
-   * overrides that one row's score so it agrees with the detail panel
-   * below instead of showing a second, independently-derived number. */
-  selectedScore?: OpportunityScoreResult;
+  /** Real multi-timeframe confluence score + per-timeframe RSI per token
+   * (see useWatchlistSignals) — the same score shows here and in the
+   * detail panel below, regardless of the chart's active timeframe. */
+  signalsByToken: Record<string, TokenSignals>;
 }
 
 export function MarketWatchlist({
@@ -95,8 +66,7 @@ export function MarketWatchlist({
   selectedId,
   onSelect,
   currency,
-  rsiByToken,
-  selectedScore,
+  signalsByToken,
 }: MarketWatchlistProps) {
   const [sortKey, setSortKey] = useState<SortKey>("marketCap");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -156,10 +126,8 @@ export function MarketWatchlist({
           <tbody>
             {sorted.map((token) => {
               const isBigMove = Math.abs(token.change24h) >= BIG_MOVE_THRESHOLD;
-              const rsi = rsiByToken[token.id] ?? mockRsiByTimeframe(token.id);
-              const real = token.id === selectedId ? selectedScore : undefined;
-              const signal = real ? real.level : classifySignal(rsi);
-              const score = real ? real.score : rowScore(rsi);
+              const signals = signalsByToken[token.id] ?? FALLBACK_SIGNALS;
+              const rsi = signals.rsiByTimeframe;
               return (
                 <tr
                   key={token.id}
@@ -207,7 +175,7 @@ export function MarketWatchlist({
                     <RsiPill value={rsi["1d"]} />
                   </td>
                   <td className="py-1.5 pr-2">
-                    <ScoreBadge level={signal} score={score} />
+                    <ScoreBadge level={signals.score.level} score={signals.score.score} />
                   </td>
                 </tr>
               );
@@ -220,10 +188,8 @@ export function MarketWatchlist({
       <div className="flex flex-col gap-2 md:hidden">
         {sorted.map((token) => {
           const isBigMove = Math.abs(token.change24h) >= BIG_MOVE_THRESHOLD;
-          const rsi = rsiByToken[token.id] ?? mockRsiByTimeframe(token.id);
-          const real = token.id === selectedId ? selectedScore : undefined;
-          const signal = real ? real.level : classifySignal(rsi);
-          const score = real ? real.score : rowScore(rsi);
+          const signals = signalsByToken[token.id] ?? FALLBACK_SIGNALS;
+          const rsi = signals.rsiByTimeframe;
           return (
             <button
               key={token.id}
@@ -240,7 +206,7 @@ export function MarketWatchlist({
                   <span className="font-medium text-[var(--color-text)]">{token.symbol}</span>
                   <span className="ml-1.5 text-xs text-[var(--color-text-dim)]">{token.name}</span>
                 </div>
-                <ScoreBadge level={signal} score={score} />
+                <ScoreBadge level={signals.score.level} score={signals.score.score} />
               </div>
 
               <div className="flex items-center justify-between gap-2">

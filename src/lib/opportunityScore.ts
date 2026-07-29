@@ -1,11 +1,13 @@
 import type { ScoreLevel } from "../components/common";
-import type { BollingerBands, Candle, IndicatorPoint } from "../types";
-import { bbSignal, calcMACD, macdSignal } from "./indicators";
+import type { Timeframe } from "../types";
+
+export type MacdSignal = "bullish" | "bearish" | "neutral";
+export type BbPosition = "above-upper" | "below-lower" | "inside";
 
 export interface OpportunityScoreInput {
   rsi: number | null;
-  macd: "bullish" | "bearish" | "neutral";
-  bbPosition: "above-upper" | "below-lower" | "inside" | null;
+  macd: MacdSignal;
+  bbPosition: BbPosition | null;
 }
 
 export interface OpportunityScoreResult {
@@ -65,27 +67,43 @@ export function computeOpportunityScore(input: OpportunityScoreInput): Opportuni
   return { score, level: classifyScore(score), breakdown };
 }
 
-/**
- * Same computation as computeOpportunityScore, starting from raw candles/
- * indicator series instead of pre-extracted signals — shared by the detail
- * panel and the watchlist table's currently-open row so both show the
- * exact same number for the same token, instead of recomputing it slightly
- * differently in two places.
- */
-export function computeOpportunityScoreFromMarket(
-  candles: Candle[],
-  rsi: IndicatorPoint[],
-  bollinger: BollingerBands[],
-): OpportunityScoreResult {
-  const lastCandle = candles[candles.length - 1];
-  const lastRsi = rsi[rsi.length - 1];
-  const lastBb = bollinger[bollinger.length - 1];
-  const macd = macdSignal(calcMACD(candles));
-  const bbPosition = lastCandle && lastBb ? bbSignal(lastCandle.close, lastBb) : null;
+/** Most frequent value in the list; ties go to whichever appears first (1h, being the most responsive timeframe, sorts first in every caller here). */
+function majority<T extends string>(values: T[]): T {
+  const counts = new Map<T, number>();
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+  let best = values[0];
+  let bestCount = 0;
+  for (const [value, count] of counts) {
+    if (count > bestCount) {
+      best = value;
+      bestCount = count;
+    }
+  }
+  return best;
+}
 
-  return computeOpportunityScore({
-    rsi: lastRsi ? lastRsi.value : null,
-    macd,
-    bbPosition,
-  });
+export interface TimeframeSignal {
+  rsi: number;
+  macd: MacdSignal;
+  bbPosition: BbPosition;
+}
+
+/**
+ * Combines RSI/MACD/Bollinger across all 3 timeframes (1h/4h/1d) into one
+ * score, instead of reading a single timeframe's snapshot: RSI is averaged,
+ * MACD and Bollinger position go by majority vote among the 3. This is what
+ * makes the score the same number everywhere for a token — the watchlist
+ * row and the detail panel — regardless of which timeframe the chart
+ * happens to have open, and a steadier read than any one timeframe alone.
+ */
+export function computeConfluenceScore(
+  byTimeframe: Record<Timeframe, TimeframeSignal>,
+): OpportunityScoreResult {
+  const timeframes: Timeframe[] = ["1h", "4h", "1d"];
+  const avgRsi =
+    timeframes.reduce((sum, tf) => sum + byTimeframe[tf].rsi, 0) / timeframes.length;
+  const macd = majority(timeframes.map((tf) => byTimeframe[tf].macd));
+  const bbPosition = majority(timeframes.map((tf) => byTimeframe[tf].bbPosition));
+
+  return computeOpportunityScore({ rsi: avgRsi, macd, bbPosition });
 }

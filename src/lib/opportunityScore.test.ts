@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { computeOpportunityScore } from "./opportunityScore";
+import { computeConfluenceScore, computeOpportunityScore, type TimeframeSignal } from "./opportunityScore";
+import type { Timeframe } from "../types";
 
 describe("computeOpportunityScore", () => {
   it("stays neutral when every signal is neutral", () => {
@@ -37,5 +38,49 @@ describe("computeOpportunityScore", () => {
   it("ignores a null RSI instead of throwing", () => {
     const result = computeOpportunityScore({ rsi: null, macd: "neutral", bbPosition: null });
     expect(result.score).toBe(50);
+  });
+});
+
+function bySignal(h1: TimeframeSignal, h4: TimeframeSignal, d1: TimeframeSignal): Record<Timeframe, TimeframeSignal> {
+  return { "1h": h1, "4h": h4, "1d": d1 };
+}
+
+describe("computeConfluenceScore", () => {
+  it("averages RSI across the 3 timeframes instead of reading just one", () => {
+    const neutral: TimeframeSignal = { rsi: 50, macd: "neutral", bbPosition: "inside" };
+    const result = computeConfluenceScore(
+      bySignal(
+        { ...neutral, rsi: 30 },
+        { ...neutral, rsi: 50 },
+        { ...neutral, rsi: 70 },
+      ),
+    );
+    // (30 + 50 + 70) / 3 = 50 -> same as an all-neutral read.
+    expect(result.score).toBe(50);
+  });
+
+  it("takes the MACD/Bollinger signal that wins 2 of 3 timeframes", () => {
+    const result = computeConfluenceScore(
+      bySignal(
+        { rsi: 50, macd: "bullish", bbPosition: "inside" },
+        { rsi: 50, macd: "bullish", bbPosition: "inside" },
+        { rsi: 50, macd: "bearish", bbPosition: "inside" },
+      ),
+    );
+    // 2 of 3 timeframes say bullish MACD -> score should move up, not stay neutral.
+    expect(result.score).toBeGreaterThan(50);
+  });
+
+  it("a single timeframe can't swing the result on its own — needs the majority of the 3", () => {
+    const result = computeConfluenceScore(
+      bySignal(
+        { rsi: 20, macd: "bullish", bbPosition: "below-lower" }, // 1h alone reads strongly bullish
+        { rsi: 60, macd: "bearish", bbPosition: "above-upper" }, // 4h and 1d both read bearish
+        { rsi: 65, macd: "bearish", bbPosition: "above-upper" },
+      ),
+    );
+    // The 4h/1d majority (bearish MACD, above-upper BB) should win out over
+    // 1h looking bullish on its own.
+    expect(result.score).toBeLessThan(50);
   });
 });

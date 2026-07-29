@@ -1,6 +1,6 @@
 import { Sparkles, TrendingDown, TrendingUp } from "lucide-react";
 import type { MarketToken } from "../types";
-import type { TokenRsiByTimeframe } from "../hooks/useWatchlistRsi";
+import type { TokenSignals } from "../hooks/useWatchlistSignals";
 import { Badge, Card } from "./common";
 
 interface ConfluenceHighlight {
@@ -16,7 +16,7 @@ const DIRECTION_META = {
 };
 
 /** Flags a coin only when RSI crosses the same threshold on all 3 timeframes at once. */
-function classifyDirection(rsi: TokenRsiByTimeframe): "oversold" | "overbought" | null {
+function classifyDirection(rsi: TokenSignals["rsiByTimeframe"]): "oversold" | "overbought" | null {
   if (rsi["1h"] <= 30 && rsi["4h"] <= 30 && rsi["1d"] <= 30) return "oversold";
   if (rsi["1h"] >= 70 && rsi["4h"] >= 70 && rsi["1d"] >= 70) return "overbought";
   return null;
@@ -24,17 +24,17 @@ function classifyDirection(rsi: TokenRsiByTimeframe): "oversold" | "overbought" 
 
 interface MarketHighlightsProps {
   tokens: MarketToken[];
-  rsiByToken: Record<string, TokenRsiByTimeframe>;
+  signalsByToken: Record<string, TokenSignals>;
 }
 
-export function MarketHighlights({ tokens, rsiByToken }: MarketHighlightsProps) {
+export function MarketHighlights({ tokens, signalsByToken }: MarketHighlightsProps) {
   const highlights: ConfluenceHighlight[] = [];
   for (const token of tokens) {
-    const rsi = rsiByToken[token.id];
-    if (!rsi) continue;
-    const direction = classifyDirection(rsi);
+    const signals = signalsByToken[token.id];
+    if (!signals) continue;
+    const direction = classifyDirection(signals.rsiByTimeframe);
     if (!direction) continue;
-    highlights.push({ tokenId: token.id, symbol: token.symbol, direction, rsi });
+    highlights.push({ tokenId: token.id, symbol: token.symbol, direction, rsi: signals.rsiByTimeframe });
   }
 
   if (highlights.length === 0) return null;

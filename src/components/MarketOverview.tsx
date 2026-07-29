@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { Info } from "lucide-react";
-import type { BollingerBands, Candle, IndicatorPoint, MarketToken, Timeframe } from "../types";
+import type { BollingerBands, Candle, MarketToken, Timeframe } from "../types";
 import { bbSignal } from "../lib/indicators";
-import { computeOpportunityScoreFromMarket } from "../lib/opportunityScore";
-import type { TokenRsiByTimeframe } from "../hooks/useWatchlistRsi";
+import type { TokenSignals } from "../hooks/useWatchlistSignals";
 import type { Currency } from "../lib/currency";
 import { Badge, Card, formatMoney, formatPrice, ScoreBadge } from "./common";
 
@@ -13,30 +12,24 @@ const TIMEFRAME_ORDER: Timeframe[] = ["1h", "4h", "1d"];
 interface MarketOverviewProps {
   token: MarketToken | undefined;
   candles: Candle[];
-  rsi: IndicatorPoint[];
   bollinger: BollingerBands[];
   currency: Currency;
-  timeframe: Timeframe;
-  /** Real per-timeframe RSI for this token (see useWatchlistRsi); the score
-   * itself only ever uses the active timeframe's real RSI/MACD/Bollinger
-   * above — this is just a secondary reference for the other two. */
-  otherTimeframeRsi?: TokenRsiByTimeframe;
+  /** Multi-timeframe confluence score + per-timeframe RSI for this token
+   * (see useWatchlistSignals) — the same number shown in the watchlist
+   * table, independent of the chart's active timeframe below. */
+  signals?: TokenSignals;
 }
 
 export function MarketOverview({
   token,
   candles,
-  rsi,
   bollinger,
   currency,
-  timeframe,
-  otherTimeframeRsi,
+  signals,
 }: MarketOverviewProps) {
   const [showExplainer, setShowExplainer] = useState(false);
   const lastCandle = candles[candles.length - 1];
   const lastBb = bollinger[bollinger.length - 1];
-  const opportunity = computeOpportunityScoreFromMarket(candles, rsi, bollinger);
-  const otherTimeframes = TIMEFRAME_ORDER.filter((t) => t !== timeframe);
 
   const bbTone =
     lastCandle && lastBb
@@ -64,21 +57,21 @@ export function MarketOverview({
       >
         <div className="flex items-center gap-2">
           <div className="num-mono text-3xl font-semibold text-[var(--color-text)]">
-            {token ? opportunity.score : "-"}
+            {token && signals ? signals.score.score : "-"}
           </div>
-          {token && <ScoreBadge level={opportunity.level} />}
+          {token && signals && <ScoreBadge level={signals.score.level} />}
         </div>
-        {token && (
+        {token && signals && (
           <p className="mt-1 text-xs text-[var(--color-text-dim)]">
-            {opportunity.breakdown.join(" · ")}
+            {signals.score.breakdown.join(" · ")}
           </p>
         )}
-        {token && otherTimeframeRsi && (
+        {token && signals && (
           <p className="num-mono mt-2 flex items-center gap-3 text-[10px] text-[var(--color-text-dim)]">
-            {otherTimeframes.map((t) => (
+            {TIMEFRAME_ORDER.map((t) => (
               <span key={t}>
                 RSI {TIMEFRAME_LABEL[t]}
-                {otherTimeframeRsi.isDemo ? " (estimado)" : ""}: {otherTimeframeRsi[t]}
+                {signals.isDemo ? " (estimado)" : ""}: {signals.rsiByTimeframe[t]}
               </span>
             ))}
           </p>
@@ -87,9 +80,12 @@ export function MarketOverview({
         {showExplainer && (
           <div className="mt-3 space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 text-xs leading-relaxed text-[var(--color-text-dim)]">
             <p>
-              O score começa neutro em <strong className="text-[var(--color-text)]">50</strong> e
-              é ajustado por 3 indicadores técnicos — nenhum deles sozinho consegue levar o
-              resultado a um extremo, só a confluência entre eles:
+              O score combina os 3 timeframes (1H, 4H e 1D) de cada indicador, não só o que
+              está aberto no gráfico — por isso o número é o mesmo aqui e na tabela, independente
+              do timeframe selecionado abaixo. Começa neutro em{" "}
+              <strong className="text-[var(--color-text)]">50</strong> e é ajustado por 3
+              indicadores técnicos — nenhum deles sozinho consegue levar o resultado a um
+              extremo, só a confluência entre eles:
             </p>
             <ul className="list-disc space-y-1.5 pl-4">
               <li>
@@ -98,15 +94,17 @@ export function MarketOverview({
                 </strong>{" "}
                 — mede a velocidade e a força das variações recentes de preço, numa escala de 0
                 a 100. Abaixo de 30 é considerado sobrevendido (favorece compra); acima de 70,
-                sobrecomprado (favorece venda). Quanto mais distante de 50, maior o ajuste no
-                score.
+                sobrecomprado (favorece venda). Usamos a{" "}
+                <strong className="text-[var(--color-text)]">média entre os 3 timeframes</strong>
+                ; quanto mais distante de 50, maior o ajuste no score.
               </li>
               <li>
                 <strong className="text-[var(--color-text)]">MACD (12/26/9)</strong> — compara
                 uma média móvel exponencial rápida (12 períodos) com uma lenta (26 períodos) e
                 uma linha de sinal (9 períodos) sobre essa diferença. Linha MACD cruzando acima
-                do sinal indica momentum de alta (+15 pontos); abaixo, momentum de baixa (−15
-                pontos).
+                do sinal indica momentum de alta; abaixo, momentum de baixa. Usamos o sinal que
+                aparece na <strong className="text-[var(--color-text)]">maioria dos 3
+                timeframes</strong> (+15 pontos se em alta, −15 se em baixa).
               </li>
               <li>
                 <strong className="text-[var(--color-text)]">
@@ -114,7 +112,8 @@ export function MarketOverview({
                 </strong>{" "}
                 — uma média móvel com bandas de volatilidade acima e abaixo do preço. Preço
                 abaixo da banda inferior soma +15 pontos (possível sobrevenda); acima da banda
-                superior, −15 (possível sobrecompra).
+                superior, −15 (possível sobrecompra) — também pela posição que aparece na maioria
+                dos 3 timeframes.
               </li>
             </ul>
             <p>

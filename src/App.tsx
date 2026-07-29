@@ -3,12 +3,11 @@ import clsx from "clsx";
 import { LayoutDashboard, Moon, Settings, Sun, Wallet, X } from "lucide-react";
 import { useMarketData } from "./hooks/useMarketData";
 import { useWatchlistTokens } from "./hooks/useWatchlistTokens";
-import { useWatchlistRsi } from "./hooks/useWatchlistRsi";
+import { useWatchlistSignals } from "./hooks/useWatchlistSignals";
 import { useMarketPanorama } from "./hooks/useMarketPanorama";
 import { useWallet } from "./hooks/useWallet";
 import { useTheme } from "./hooks/useTheme";
 import { loadSettings, saveSettings } from "./lib/settings";
-import { computeOpportunityScoreFromMarket } from "./lib/opportunityScore";
 import { MarketHighlights } from "./components/MarketHighlights";
 import { MarketOverview } from "./components/MarketOverview";
 import { MarketPanorama } from "./components/MarketPanorama";
@@ -64,20 +63,12 @@ function App() {
   });
 
   const watchlistTokens = useWatchlistTokens(watchlist, settings.coingeckoApiKey || undefined);
-  const rsiByToken = useWatchlistRsi(watchlist, settings.coingeckoApiKey || undefined);
+  const signalsByToken = useWatchlistSignals(watchlist, settings.coingeckoApiKey || undefined);
   const panorama = useMarketPanorama(settings.coingeckoApiKey || undefined);
   const market = useMarketData(tokenId, timeframe, settings.coingeckoApiKey || undefined);
   const wallet = useWallet(walletQuery.address, walletQuery.chain, settings.etherscanApiKey);
 
   const selectedToken = watchlistTokens.tokens.find((t) => t.id === tokenId);
-  // The table's own Score column is a lightweight mock (see MarketWatchlist);
-  // for whichever token's chart is actually open, we already have real
-  // candles/RSI/Bollinger fetched, so show that row the same score the
-  // detail panel below computes, instead of a different mocked number.
-  const selectedScore =
-    tokenId && !market.loading && market.candles.length > 0
-      ? computeOpportunityScoreFromMarket(market.candles, market.rsi, market.bollinger)
-      : undefined;
 
   function persist(next: typeof settings) {
     setSettings(next);
@@ -177,7 +168,7 @@ function App() {
                 {panorama.error ? ` (${panorama.error})` : ""}. Exibindo dados simulados.
               </div>
             )}
-            <MarketHighlights tokens={watchlistTokens.tokens} rsiByToken={rsiByToken} />
+            <MarketHighlights tokens={watchlistTokens.tokens} signalsByToken={signalsByToken} />
 
             {watchlistTokens.isDemo && watchlist.length > 0 && (
               <div className="rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-3 py-2 text-xs text-[var(--color-text)]">
@@ -214,8 +205,7 @@ function App() {
                   selectedId={tokenId}
                   onSelect={handleTokenSelect}
                   currency={MERCADO_CURRENCY}
-                  rsiByToken={rsiByToken}
-                  selectedScore={selectedScore}
+                  signalsByToken={signalsByToken}
                 />
 
                 {tokenId && (
@@ -261,11 +251,9 @@ function App() {
                         <MarketOverview
                           token={selectedToken}
                           candles={market.candles}
-                          rsi={market.rsi}
                           bollinger={market.bollinger}
                           currency={MERCADO_CURRENCY}
-                          timeframe={timeframe}
-                          otherTimeframeRsi={tokenId ? rsiByToken[tokenId] : undefined}
+                          signals={tokenId ? signalsByToken[tokenId] : undefined}
                         />
                         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
                           <Suspense fallback={<TabFallback />}>

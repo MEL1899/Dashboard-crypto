@@ -9,7 +9,8 @@ import type {
   WalletTransaction,
 } from "../types";
 import type { WalletSnapshot } from "./etherscan";
-import { calcRSI } from "./indicators";
+import { bbSignal, calcBollingerBands, calcMACD, calcRSI, macdSignal } from "./indicators";
+import type { MacdSignal, BbPosition } from "./opportunityScore";
 
 // Deterministic PRNG so demo mode looks the same across reloads/screenshots.
 function mulberry32(seed: number) {
@@ -141,22 +142,32 @@ export function mockCandles(tokenId: string, timeframe: Timeframe): Candle[] {
 }
 
 /**
- * Mocked per-timeframe RSI, used as a fallback whenever the real per-token
- * fetch (useWatchlistRsi) fails, and by the watchlist table/highlights
- * before real data has resolved. Computed with the real calcRSI off the
- * same mockCandles used for the chart itself, so if a token's chart also
- * happens to be in fallback mode, its "RSI 1D" here and the score card's
- * active-timeframe RSI agree instead of coming from two unrelated PRNGs.
+ * Mocked per-timeframe RSI+MACD+Bollinger, used as a fallback whenever the
+ * real per-token fetch (useWatchlistSignals) fails, and as the instant
+ * placeholder before real data has resolved. Computed with the real
+ * indicator math off the same mockCandles used for the chart itself, so if
+ * a token's chart also happens to be in fallback mode, its numbers here
+ * agree with what the chart shows instead of coming from unrelated PRNGs.
  */
-export function mockRsiByTimeframe(tokenId: string): { "1h": number; "4h": number; "1d": number } {
-  const rsiForTimeframe = (timeframe: Timeframe): number => {
-    const series = calcRSI(mockCandles(tokenId, timeframe));
-    return series.length > 0 ? Math.round(series[series.length - 1].value) : 50;
+export function mockSignalsByTimeframe(
+  tokenId: string,
+): Record<Timeframe, { rsi: number; macd: MacdSignal; bbPosition: BbPosition }> {
+  const signalForTimeframe = (timeframe: Timeframe) => {
+    const candles = mockCandles(tokenId, timeframe);
+    const rsiSeries = calcRSI(candles);
+    const bbSeries = calcBollingerBands(candles);
+    const lastCandle = candles[candles.length - 1];
+    const lastBb = bbSeries[bbSeries.length - 1];
+    return {
+      rsi: rsiSeries.length > 0 ? Math.round(rsiSeries[rsiSeries.length - 1].value) : 50,
+      macd: macdSignal(calcMACD(candles)),
+      bbPosition: lastCandle && lastBb ? bbSignal(lastCandle.close, lastBb) : ("inside" as const),
+    };
   };
   return {
-    "1h": rsiForTimeframe("1h"),
-    "4h": rsiForTimeframe("4h"),
-    "1d": rsiForTimeframe("1d"),
+    "1h": signalForTimeframe("1h"),
+    "4h": signalForTimeframe("4h"),
+    "1d": signalForTimeframe("1d"),
   };
 }
 
