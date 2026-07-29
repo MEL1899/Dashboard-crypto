@@ -7,7 +7,6 @@ import { useWatchlistRsi } from "./hooks/useWatchlistRsi";
 import { useMarketPanorama } from "./hooks/useMarketPanorama";
 import { useWallet } from "./hooks/useWallet";
 import { useTheme } from "./hooks/useTheme";
-import { useCurrency } from "./hooks/useCurrency";
 import { loadSettings, saveSettings } from "./lib/settings";
 import { computeOpportunityScoreFromMarket } from "./lib/opportunityScore";
 import { MarketHighlights } from "./components/MarketHighlights";
@@ -17,7 +16,14 @@ import { MarketWatchlist } from "./components/MarketWatchlist";
 import { TokenSelector } from "./components/TokenSelector";
 import { SettingsModal } from "./components/SettingsModal";
 import { Spinner } from "./components/common";
+import type { Currency } from "./lib/currency";
 import type { ChainKey, Timeframe } from "./types";
+
+// USD/BRL toggle is on hold until we build out Carteira, which is where a
+// currency choice actually matters (a wallet has real holdings to convert).
+// The Mercado tab stays USD-only for now — formatPrice/formatMoney remain
+// currency-aware so this is a one-line change to re-enable later.
+const MERCADO_CURRENCY: Currency = "USD";
 
 // Code-split the heavy charting views (lightweight-charts / recharts) so the
 // initial bundle only pays for whichever tab is actually opened first.
@@ -47,7 +53,6 @@ type Tab = "market" | "wallet";
 function App() {
   const [settings, setSettings] = useState(loadSettings());
   const { theme, toggleTheme } = useTheme();
-  const { currency, toggleCurrency } = useCurrency();
   const [tab, setTab] = useState<Tab>("market");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [watchlist, setWatchlist] = useState<string[]>(settings.watchlist);
@@ -144,14 +149,6 @@ function App() {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={toggleCurrency}
-              aria-label={`Mudar para ${currency === "USD" ? "Real" : "Dólar"}`}
-              className="rounded-lg border border-[var(--color-border)] px-2.5 py-2 text-xs font-medium text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
-            >
-              {currency === "USD" ? "US$" : "R$"}
-            </button>
-
-            <button
               onClick={toggleTheme}
               aria-label={theme === "dark" ? "Mudar para tema claro" : "Mudar para tema escuro"}
               className="flex items-center justify-center rounded-lg border border-[var(--color-border)] p-2 text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
@@ -173,7 +170,7 @@ function App() {
       <main className="mx-auto max-w-6xl px-4 py-5">
         {tab === "market" ? (
           <div className="flex flex-col gap-4">
-            <MarketPanorama currency={currency} data={panorama.data} />
+            <MarketPanorama currency={MERCADO_CURRENCY} data={panorama.data} />
             {panorama.isDemo && (
               <div className="rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-3 py-2 text-xs text-[var(--color-text)]">
                 Modo demonstração: não foi possível carregar o panorama de mercado agora
@@ -197,7 +194,7 @@ function App() {
               onAdd={handleAddToken}
               onRemove={handleRemoveToken}
               apiKey={settings.coingeckoApiKey || undefined}
-              currency={currency}
+              currency={MERCADO_CURRENCY}
             />
 
             {watchlist.length === 0 ? (
@@ -216,7 +213,7 @@ function App() {
                   tokens={watchlistTokens.tokens}
                   selectedId={tokenId}
                   onSelect={handleTokenSelect}
-                  currency={currency}
+                  currency={MERCADO_CURRENCY}
                   rsiByToken={rsiByToken}
                   selectedScore={selectedScore}
                 />
@@ -266,7 +263,7 @@ function App() {
                           candles={market.candles}
                           rsi={market.rsi}
                           bollinger={market.bollinger}
-                          currency={currency}
+                          currency={MERCADO_CURRENCY}
                           timeframe={timeframe}
                           otherTimeframeRsi={tokenId ? rsiByToken[tokenId] : undefined}
                         />
