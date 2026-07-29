@@ -1,7 +1,7 @@
 import type { BollingerBands, Candle, IndicatorPoint, MarketToken, Timeframe } from "../types";
 import { bbSignal } from "../lib/indicators";
 import { computeOpportunityScoreFromMarket } from "../lib/opportunityScore";
-import { mockRsiByTimeframe } from "../lib/mock";
+import type { TokenRsiByTimeframe } from "../hooks/useWatchlistRsi";
 import type { Currency } from "../lib/currency";
 import { Badge, Card, formatMoney, ScoreBadge } from "./common";
 
@@ -15,6 +15,10 @@ interface MarketOverviewProps {
   bollinger: BollingerBands[];
   currency: Currency;
   timeframe: Timeframe;
+  /** Real per-timeframe RSI for this token (see useWatchlistRsi); the score
+   * itself only ever uses the active timeframe's real RSI/MACD/Bollinger
+   * above — this is just a secondary reference for the other two. */
+  otherTimeframeRsi?: TokenRsiByTimeframe;
 }
 
 export function MarketOverview({
@@ -24,16 +28,11 @@ export function MarketOverview({
   bollinger,
   currency,
   timeframe,
+  otherTimeframeRsi,
 }: MarketOverviewProps) {
   const lastCandle = candles[candles.length - 1];
   const lastBb = bollinger[bollinger.length - 1];
   const opportunity = computeOpportunityScoreFromMarket(candles, rsi, bollinger);
-
-  // The score is computed from the real, active-timeframe RSI/MACD/Bollinger
-  // read. We don't yet fetch full candle history for every other timeframe,
-  // so the other two timeframes shown here are the same mocked RSI used in
-  // the watchlist table — a rough secondary reference, not part of the score.
-  const otherTimeframeRsi = token ? mockRsiByTimeframe(token.id) : null;
   const otherTimeframes = TIMEFRAME_ORDER.filter((t) => t !== timeframe);
 
   const bbTone =
@@ -63,7 +62,8 @@ export function MarketOverview({
           <p className="num-mono mt-2 flex items-center gap-3 text-[10px] text-[var(--color-text-dim)]">
             {otherTimeframes.map((t) => (
               <span key={t}>
-                RSI {TIMEFRAME_LABEL[t]} (simulado): {otherTimeframeRsi[t]}
+                RSI {TIMEFRAME_LABEL[t]}
+                {otherTimeframeRsi.isDemo ? " (estimado)" : ""}: {otherTimeframeRsi[t]}
               </span>
             ))}
           </p>

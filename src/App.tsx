@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { LayoutDashboard, Moon, Settings, Sun, Wallet, X } from "lucide-react";
 import { useMarketData } from "./hooks/useMarketData";
 import { useWatchlistTokens } from "./hooks/useWatchlistTokens";
+import { useWatchlistRsi } from "./hooks/useWatchlistRsi";
 import { useWallet } from "./hooks/useWallet";
 import { useTheme } from "./hooks/useTheme";
 import { useCurrency } from "./hooks/useCurrency";
@@ -57,6 +58,7 @@ function App() {
   });
 
   const watchlistTokens = useWatchlistTokens(watchlist, settings.coingeckoApiKey || undefined);
+  const rsiByToken = useWatchlistRsi(watchlist, settings.coingeckoApiKey || undefined);
   const market = useMarketData(tokenId, timeframe, settings.coingeckoApiKey || undefined);
   const wallet = useWallet(walletQuery.address, walletQuery.chain, settings.etherscanApiKey);
 
@@ -170,7 +172,7 @@ function App() {
         {tab === "market" ? (
           <div className="flex flex-col gap-4">
             <MarketPanorama currency={currency} />
-            <MarketHighlights />
+            <MarketHighlights tokens={watchlistTokens.tokens} rsiByToken={rsiByToken} />
 
             {watchlistTokens.isDemo && watchlist.length > 0 && (
               <div className="rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-3 py-2 text-xs text-[var(--color-text)]">
@@ -207,6 +209,7 @@ function App() {
                   selectedId={tokenId}
                   onSelect={handleTokenSelect}
                   currency={currency}
+                  rsiByToken={rsiByToken}
                   selectedScore={selectedScore}
                 />
 
@@ -257,6 +260,7 @@ function App() {
                           bollinger={market.bollinger}
                           currency={currency}
                           timeframe={timeframe}
+                          otherTimeframeRsi={tokenId ? rsiByToken[tokenId] : undefined}
                         />
                         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
                           <Suspense fallback={<TabFallback />}>

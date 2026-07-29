@@ -1,4 +1,6 @@
 import { Sparkles, TrendingDown, TrendingUp } from "lucide-react";
+import type { MarketToken } from "../types";
+import type { TokenRsiByTimeframe } from "../hooks/useWatchlistRsi";
 import { Badge, Card } from "./common";
 
 interface ConfluenceHighlight {
@@ -8,22 +10,34 @@ interface ConfluenceHighlight {
   rsi: { "1h": number; "4h": number; "1d": number };
 }
 
-// Mocked until RSI is computed per-timeframe for the whole watchlist (today
-// it's only computed for whichever single timeframe the open chart uses).
-// Real version: flag a coin here when RSI crosses the same threshold (<=30
-// or >=70) on 1H, 4H and 1D at once.
-const MOCK_HIGHLIGHTS: ConfluenceHighlight[] = [
-  { tokenId: "bitcoin", symbol: "BTC", direction: "oversold", rsi: { "1h": 24, "4h": 27, "1d": 22 } },
-  { tokenId: "solana", symbol: "SOL", direction: "overbought", rsi: { "1h": 78, "4h": 74, "1d": 81 } },
-];
-
 const DIRECTION_META = {
   oversold: { label: "sobrevendido", tone: "up" as const, icon: TrendingUp },
   overbought: { label: "sobrecomprado", tone: "down" as const, icon: TrendingDown },
 };
 
-export function MarketHighlights() {
-  if (MOCK_HIGHLIGHTS.length === 0) return null;
+/** Flags a coin only when RSI crosses the same threshold on all 3 timeframes at once. */
+function classifyDirection(rsi: TokenRsiByTimeframe): "oversold" | "overbought" | null {
+  if (rsi["1h"] <= 30 && rsi["4h"] <= 30 && rsi["1d"] <= 30) return "oversold";
+  if (rsi["1h"] >= 70 && rsi["4h"] >= 70 && rsi["1d"] >= 70) return "overbought";
+  return null;
+}
+
+interface MarketHighlightsProps {
+  tokens: MarketToken[];
+  rsiByToken: Record<string, TokenRsiByTimeframe>;
+}
+
+export function MarketHighlights({ tokens, rsiByToken }: MarketHighlightsProps) {
+  const highlights: ConfluenceHighlight[] = [];
+  for (const token of tokens) {
+    const rsi = rsiByToken[token.id];
+    if (!rsi) continue;
+    const direction = classifyDirection(rsi);
+    if (!direction) continue;
+    highlights.push({ tokenId: token.id, symbol: token.symbol, direction, rsi });
+  }
+
+  if (highlights.length === 0) return null;
 
   return (
     <Card
@@ -36,7 +50,7 @@ export function MarketHighlights() {
       }
     >
       <div className="flex flex-col gap-2">
-        {MOCK_HIGHLIGHTS.map((h) => {
+        {highlights.map((h) => {
           const meta = DIRECTION_META[h.direction];
           const Icon = meta.icon;
           return (
