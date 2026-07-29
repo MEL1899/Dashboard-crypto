@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp } from "lucide-react";
 import type { MarketToken } from "../types";
 import type { Currency } from "../lib/currency";
 import { mockRsiByTimeframe } from "../lib/mock";
+import type { OpportunityScoreResult } from "../lib/opportunityScore";
 import { Badge, Card, ScoreBadge, type ScoreLevel, formatMoney } from "./common";
 
 type SortKey = "price" | "change24h" | "marketCap" | "volume24h";
@@ -78,9 +79,19 @@ interface MarketWatchlistProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
   currency: Currency;
+  /** Real score (RSI+MACD+Bollinger) for whichever token's chart is open —
+   * overrides that one row's mocked score so it agrees with the detail
+   * panel below instead of showing a second, different number. */
+  selectedScore?: OpportunityScoreResult;
 }
 
-export function MarketWatchlist({ tokens, selectedId, onSelect, currency }: MarketWatchlistProps) {
+export function MarketWatchlist({
+  tokens,
+  selectedId,
+  onSelect,
+  currency,
+  selectedScore,
+}: MarketWatchlistProps) {
   const [sortKey, setSortKey] = useState<SortKey>("marketCap");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -140,8 +151,9 @@ export function MarketWatchlist({ tokens, selectedId, onSelect, currency }: Mark
             {sorted.map((token) => {
               const isBigMove = Math.abs(token.change24h) >= BIG_MOVE_THRESHOLD;
               const rsi = mockRsiByTimeframe(token.id);
-              const signal = classifySignal(rsi);
-              const score = mockRowScore(rsi);
+              const real = token.id === selectedId ? selectedScore : undefined;
+              const signal = real ? real.level : classifySignal(rsi);
+              const score = real ? real.score : mockRowScore(rsi);
               return (
                 <tr
                   key={token.id}
@@ -189,10 +201,7 @@ export function MarketWatchlist({ tokens, selectedId, onSelect, currency }: Mark
                     <RsiPill value={rsi["1d"]} />
                   </td>
                   <td className="py-1.5 pr-2">
-                    <span className="flex items-center gap-1.5">
-                      <span className="num-mono text-[var(--color-text-dim)]">{score}</span>
-                      <ScoreBadge level={signal} />
-                    </span>
+                    <ScoreBadge level={signal} score={score} />
                   </td>
                 </tr>
               );
@@ -206,8 +215,9 @@ export function MarketWatchlist({ tokens, selectedId, onSelect, currency }: Mark
         {sorted.map((token) => {
           const isBigMove = Math.abs(token.change24h) >= BIG_MOVE_THRESHOLD;
           const rsi = mockRsiByTimeframe(token.id);
-          const signal = classifySignal(rsi);
-          const score = mockRowScore(rsi);
+          const real = token.id === selectedId ? selectedScore : undefined;
+          const signal = real ? real.level : classifySignal(rsi);
+          const score = real ? real.score : mockRowScore(rsi);
           return (
             <button
               key={token.id}
@@ -224,10 +234,7 @@ export function MarketWatchlist({ tokens, selectedId, onSelect, currency }: Mark
                   <span className="font-medium text-[var(--color-text)]">{token.symbol}</span>
                   <span className="ml-1.5 text-xs text-[var(--color-text-dim)]">{token.name}</span>
                 </div>
-                <span className="flex items-center gap-1.5">
-                  <span className="num-mono text-xs text-[var(--color-text-dim)]">{score}</span>
-                  <ScoreBadge level={signal} />
-                </span>
+                <ScoreBadge level={signal} score={score} />
               </div>
 
               <div className="flex items-center justify-between gap-2">

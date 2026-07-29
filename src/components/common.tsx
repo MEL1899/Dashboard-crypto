@@ -65,27 +65,42 @@ export const SCORE_LEVEL_META: Record<
  * Same visual language everywhere a technical signal is shown (watchlist
  * table, detail panel): solid background for "Forte", ~55% opacity for the
  * milder level, reusing the app's up/down colors instead of new hues.
+ *
+ * Pass `score` where there's room for the underlying number (table rows,
+ * cards) so it renders as one pill ("41 · Venda") instead of a separate
+ * plain-text number sitting next to the badge. Omit it for the detail
+ * panel's hero card, which already shows the score on its own line.
  */
-export function ScoreBadge({ level }: { level: ScoreLevel }) {
+export function ScoreBadge({ level, score }: { level: ScoreLevel; score?: number }) {
   const meta = SCORE_LEVEL_META[level];
+  const content =
+    score === undefined ? (
+      meta.label
+    ) : (
+      <>
+        <span className="num-mono">{score}</span>
+        <span className="mx-1 opacity-60">·</span>
+        {meta.label}
+      </>
+    );
   if (meta.tone === "neutral") {
     return (
-      <span className="inline-flex items-center rounded-full bg-white/5 px-2.5 py-0.5 text-xs font-medium text-[var(--color-text-dim)]">
-        {meta.label}
+      <span className="inline-flex items-center whitespace-nowrap rounded-full bg-white/5 px-2.5 py-0.5 text-xs font-medium text-[var(--color-text-dim)]">
+        {content}
       </span>
     );
   }
   const solid = meta.tone === "up" ? "#0ca30c" : "#d03b3b";
   return (
     <span
-      className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
+      className="inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium"
       style={
         meta.strong
           ? { backgroundColor: solid, color: "#fff" }
           : { backgroundColor: `${solid}8c`, color: solid }
       }
     >
-      {meta.label}
+      {content}
     </span>
   );
 }

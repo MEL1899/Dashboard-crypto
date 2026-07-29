@@ -7,6 +7,7 @@ import { useWallet } from "./hooks/useWallet";
 import { useTheme } from "./hooks/useTheme";
 import { useCurrency } from "./hooks/useCurrency";
 import { loadSettings, saveSettings } from "./lib/settings";
+import { computeOpportunityScoreFromMarket } from "./lib/opportunityScore";
 import { MarketHighlights } from "./components/MarketHighlights";
 import { MarketOverview } from "./components/MarketOverview";
 import { MarketPanorama } from "./components/MarketPanorama";
@@ -60,6 +61,14 @@ function App() {
   const wallet = useWallet(walletQuery.address, walletQuery.chain, settings.etherscanApiKey);
 
   const selectedToken = watchlistTokens.tokens.find((t) => t.id === tokenId);
+  // The table's own Score column is a lightweight mock (see MarketWatchlist);
+  // for whichever token's chart is actually open, we already have real
+  // candles/RSI/Bollinger fetched, so show that row the same score the
+  // detail panel below computes, instead of a different mocked number.
+  const selectedScore =
+    tokenId && !market.loading && market.candles.length > 0
+      ? computeOpportunityScoreFromMarket(market.candles, market.rsi, market.bollinger)
+      : undefined;
 
   function persist(next: typeof settings) {
     setSettings(next);
@@ -198,6 +207,7 @@ function App() {
                   selectedId={tokenId}
                   onSelect={handleTokenSelect}
                   currency={currency}
+                  selectedScore={selectedScore}
                 />
 
                 {tokenId && (

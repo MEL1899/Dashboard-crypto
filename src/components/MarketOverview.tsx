@@ -1,6 +1,6 @@
 import type { BollingerBands, Candle, IndicatorPoint, MarketToken, Timeframe } from "../types";
-import { bbSignal, calcMACD, macdSignal } from "../lib/indicators";
-import { computeOpportunityScore } from "../lib/opportunityScore";
+import { bbSignal } from "../lib/indicators";
+import { computeOpportunityScoreFromMarket } from "../lib/opportunityScore";
 import { mockRsiByTimeframe } from "../lib/mock";
 import type { Currency } from "../lib/currency";
 import { Badge, Card, formatMoney, ScoreBadge } from "./common";
@@ -26,16 +26,8 @@ export function MarketOverview({
   timeframe,
 }: MarketOverviewProps) {
   const lastCandle = candles[candles.length - 1];
-  const lastRsi = rsi[rsi.length - 1];
   const lastBb = bollinger[bollinger.length - 1];
-  const macd = macdSignal(calcMACD(candles));
-  const bbPosition = lastCandle && lastBb ? bbSignal(lastCandle.close, lastBb) : null;
-
-  const opportunity = computeOpportunityScore({
-    rsi: lastRsi ? lastRsi.value : null,
-    macd,
-    bbPosition,
-  });
+  const opportunity = computeOpportunityScoreFromMarket(candles, rsi, bollinger);
 
   // The score is computed from the real, active-timeframe RSI/MACD/Bollinger
   // read. We don't yet fetch full candle history for every other timeframe,

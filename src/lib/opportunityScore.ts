@@ -1,4 +1,6 @@
 import type { ScoreLevel } from "../components/common";
+import type { BollingerBands, Candle, IndicatorPoint } from "../types";
+import { bbSignal, calcMACD, macdSignal } from "./indicators";
 
 export interface OpportunityScoreInput {
   rsi: number | null;
@@ -61,4 +63,29 @@ export function computeOpportunityScore(input: OpportunityScoreInput): Opportuni
   score = Math.max(0, Math.min(100, Math.round(score)));
 
   return { score, level: classifyScore(score), breakdown };
+}
+
+/**
+ * Same computation as computeOpportunityScore, starting from raw candles/
+ * indicator series instead of pre-extracted signals — shared by the detail
+ * panel and the watchlist table's currently-open row so both show the
+ * exact same number for the same token, instead of recomputing it slightly
+ * differently in two places.
+ */
+export function computeOpportunityScoreFromMarket(
+  candles: Candle[],
+  rsi: IndicatorPoint[],
+  bollinger: BollingerBands[],
+): OpportunityScoreResult {
+  const lastCandle = candles[candles.length - 1];
+  const lastRsi = rsi[rsi.length - 1];
+  const lastBb = bollinger[bollinger.length - 1];
+  const macd = macdSignal(calcMACD(candles));
+  const bbPosition = lastCandle && lastBb ? bbSignal(lastCandle.close, lastBb) : null;
+
+  return computeOpportunityScore({
+    rsi: lastRsi ? lastRsi.value : null,
+    macd,
+    bbPosition,
+  });
 }
