@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchKlines, symbolForToken } from "../lib/binance";
 import { fetchCandlesForTimeframe } from "../lib/coingecko";
 import { calcRSI } from "../lib/indicators";
@@ -56,6 +56,8 @@ async function fetchTokenRsi(tokenId: string, apiKey?: string): Promise<TokenRsi
 export function useWatchlistRsi(ids: string[], apiKey?: string) {
   const key = ids.join(",");
   const [data, setData] = useState<Record<string, TokenRsiByTimeframe>>({});
+  const dataRef = useRef(data);
+  dataRef.current = data;
 
   useEffect(() => {
     const currentIds = key ? key.split(",") : [];
@@ -64,14 +66,32 @@ export function useWatchlistRsi(ids: string[], apiKey?: string) {
       return;
     }
 
+    // Only fetch tokens we don't already have — adding one token to an
+    // existing watchlist used to re-fetch RSI (3 requests each: 1h/4h/1d)
+    // for every other token already on it too, which could burst past
+    // CoinGecko's tight public rate limit and make the search/add flow
+    // fail right when you tried to add a coin.
+    const missingIds = currentIds.filter((id) => !(id in dataRef.current));
+
+    // Drop entries for tokens no longer on the watchlist.
+    setData((prev) => {
+      const next: Record<string, TokenRsiByTimeframe> = {};
+      for (const id of currentIds) {
+        if (prev[id]) next[id] = prev[id];
+      }
+      return next;
+    });
+
+    if (missingIds.length === 0) return;
+
     let cancelled = false;
 
     async function load() {
       const entries = await Promise.all(
-        currentIds.map(async (id) => [id, await fetchTokenRsi(id, apiKey)] as const),
+        missingIds.map(async (id) => [id, await fetchTokenRsi(id, apiKey)] as const),
       );
       if (cancelled) return;
-      setData(Object.fromEntries(entries));
+      setData((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
     }
 
     load();
