@@ -66,13 +66,16 @@ export function PriceChart({ candles, bollinger, rsi, volume }: PriceChartProps)
       })),
     );
 
-    const bbColor = { upper: "#7c6cff", middle: "#c7cad6", lower: "#7c6cff" };
+    // Upper band = dynamic resistance/overbought zone, lower band = dynamic
+    // support/oversold zone — same red/green semantics used everywhere else
+    // in this app (RSI, 24h change), not an arbitrary color choice.
+    const bbColor = { upper: "#f43f5e", middle: "#8b93a7", lower: "#22c55e" };
     for (const key of ["upper", "middle", "lower"] as const) {
       const series = chart.addSeries(
         LineSeries,
         {
           color: bbColor[key],
-          lineWidth: key === "middle" ? 1 : 1,
+          lineWidth: 1,
           lineStyle: key === "middle" ? 2 : 0,
           crosshairMarkerVisible: false,
           lastValueVisible: false,
