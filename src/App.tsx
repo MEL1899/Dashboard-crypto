@@ -246,6 +246,7 @@ function App() {
                           rsi={market.rsi}
                           bollinger={market.bollinger}
                           currency={currency}
+                          timeframe={timeframe}
                         />
                         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
                           <Suspense fallback={<TabFallback />}>

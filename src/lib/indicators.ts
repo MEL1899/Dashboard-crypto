@@ -1,4 +1,4 @@
-import type { BollingerBands, Candle, IndicatorPoint } from "../types";
+import type { BollingerBands, Candle, IndicatorPoint, MACDPoint } from "../types";
 
 /**
  * Wilder's RSI (the standard used by most charting platforms).
@@ -75,6 +75,58 @@ export function calcBollingerBands(
 
 export function calcVolumeSeries(candles: Candle[]): IndicatorPoint[] {
   return candles.map((c) => ({ time: c.time, value: c.volume }));
+}
+
+function calcEMASeries(values: number[], period: number): number[] {
+  const k = 2 / (period + 1);
+  const out: number[] = [values[0]];
+  for (let i = 1; i < values.length; i++) {
+    out.push(values[i] * k + out[i - 1] * (1 - k));
+  }
+  return out;
+}
+
+/**
+ * MACD (12/26 EMA difference, 9-period EMA signal line) — the classic
+ * momentum companion to RSI: RSI flags "stretched", MACD flags whether
+ * momentum has actually turned.
+ */
+export function calcMACD(
+  candles: Candle[],
+  fastPeriod = 12,
+  slowPeriod = 26,
+  signalPeriod = 9,
+): MACDPoint[] {
+  if (candles.length < slowPeriod + signalPeriod) return [];
+
+  const closes = candles.map((c) => c.close);
+  const fastEma = calcEMASeries(closes, fastPeriod);
+  const slowEma = calcEMASeries(closes, slowPeriod);
+  const macdLine = closes.map((_, i) => fastEma[i] - slowEma[i]);
+  const signalLine = calcEMASeries(macdLine.slice(slowPeriod - 1), signalPeriod);
+
+  const out: MACDPoint[] = [];
+  for (let i = 0; i < signalLine.length; i++) {
+    const candleIndex = i + slowPeriod - 1;
+    const macd = macdLine[candleIndex];
+    const signal = signalLine[i];
+    out.push({
+      time: candles[candleIndex].time,
+      macd,
+      signal,
+      histogram: macd - signal,
+    });
+  }
+  return out;
+}
+
+/** Bullish once the MACD line sits above its signal line, bearish below. */
+export function macdSignal(points: MACDPoint[]): "bullish" | "bearish" | "neutral" {
+  if (points.length === 0) return "neutral";
+  const last = points[points.length - 1];
+  if (last.histogram > 0) return "bullish";
+  if (last.histogram < 0) return "bearish";
+  return "neutral";
 }
 
 /** Simple momentum read used for a plain-language insight badge. */

@@ -72,6 +72,13 @@ export interface BollingerBands {
   lower: number;
 }
 
+export interface MACDPoint {
+  time: number;
+  macd: number;
+  signal: number;
+  histogram: number;
+}
+
 export type Timeframe = "1h" | "4h" | "1d";
 
 export interface AppSettings {

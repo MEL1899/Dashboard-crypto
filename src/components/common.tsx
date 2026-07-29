@@ -48,6 +48,48 @@ export function Badge({
   );
 }
 
+export type ScoreLevel = "strongBuy" | "buy" | "neutral" | "sell" | "strongSell";
+
+export const SCORE_LEVEL_META: Record<
+  ScoreLevel,
+  { label: string; tone: "up" | "down" | "neutral"; strong: boolean }
+> = {
+  strongBuy: { label: "Compra Forte", tone: "up", strong: true },
+  buy: { label: "Compra", tone: "up", strong: false },
+  neutral: { label: "Neutro", tone: "neutral", strong: false },
+  sell: { label: "Venda", tone: "down", strong: false },
+  strongSell: { label: "Venda Forte", tone: "down", strong: true },
+};
+
+/**
+ * Same visual language everywhere a technical signal is shown (watchlist
+ * table, detail panel): solid background for "Forte", ~55% opacity for the
+ * milder level, reusing the app's up/down colors instead of new hues.
+ */
+export function ScoreBadge({ level }: { level: ScoreLevel }) {
+  const meta = SCORE_LEVEL_META[level];
+  if (meta.tone === "neutral") {
+    return (
+      <span className="inline-flex items-center rounded-full bg-white/5 px-2.5 py-0.5 text-xs font-medium text-[var(--color-text-dim)]">
+        {meta.label}
+      </span>
+    );
+  }
+  const solid = meta.tone === "up" ? "#0ca30c" : "#d03b3b";
+  return (
+    <span
+      className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
+      style={
+        meta.strong
+          ? { backgroundColor: solid, color: "#fff" }
+          : { backgroundColor: `${solid}8c`, color: solid }
+      }
+    >
+      {meta.label}
+    </span>
+  );
+}
+
 export function Spinner({ className }: { className?: string }) {
   return (
     <div

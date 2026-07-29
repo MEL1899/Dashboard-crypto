@@ -125,6 +125,25 @@ export function mockCandles(tokenId: string, timeframe: Timeframe): Candle[] {
   return candles;
 }
 
+/**
+ * Mocked per-timeframe RSI, shared by the watchlist table and the detail
+ * panel's "other timeframes" line — until RSI is actually computed for
+ * every timeframe of every watchlist token (today it's only computed for
+ * whichever token/timeframe combination has its chart open).
+ */
+export function mockRsiByTimeframe(tokenId: string): { "1h": number; "4h": number; "1d": number } {
+  const seed = seedFromString(tokenId);
+  const rand = (offset: number) => {
+    const x = Math.sin(seed + offset) * 10000;
+    return x - Math.floor(x);
+  };
+  return {
+    "1h": Math.round(15 + rand(1) * 70),
+    "4h": Math.round(15 + rand(2) * 70),
+    "1d": Math.round(15 + rand(3) * 70),
+  };
+}
+
 const MOCK_TOKENS_HELD = ["USDC", "UNI", "AAVE", "PEPE", "ARB"];
 
 export function mockWalletSnapshot(address: string, chain: string): WalletSnapshot {

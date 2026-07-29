@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   bbSignal,
   calcBollingerBands,
+  calcMACD,
   calcRSI,
   calcSMA,
   calcVolumeSeries,
+  macdSignal,
   rsiSignal,
 } from "./indicators";
 import type { Candle } from "../types";
@@ -96,6 +98,38 @@ describe("rsiSignal", () => {
     expect(rsiSignal(70)).toBe("overbought");
     expect(rsiSignal(70.1)).toBe("overbought");
     expect(rsiSignal(50)).toBe("neutral");
+  });
+});
+
+describe("calcMACD", () => {
+  it("returns an empty series when there is not enough data", () => {
+    expect(calcMACD(makeCandles([1, 2, 3]))).toEqual([]);
+  });
+
+  it("produces a positive histogram on a sustained uptrend", () => {
+    const closes = Array.from({ length: 60 }, (_, i) => 100 + i * 2);
+    const macd = calcMACD(makeCandles(closes));
+    expect(macd.length).toBeGreaterThan(0);
+    const last = macd[macd.length - 1];
+    expect(last.macd).toBeGreaterThan(0);
+    expect(last.histogram).toBeGreaterThan(0);
+  });
+
+  it("produces a negative histogram on a sustained downtrend", () => {
+    const closes = Array.from({ length: 60 }, (_, i) => 200 - i * 2);
+    const macd = calcMACD(makeCandles(closes));
+    const last = macd[macd.length - 1];
+    expect(last.macd).toBeLessThan(0);
+    expect(last.histogram).toBeLessThan(0);
+  });
+});
+
+describe("macdSignal", () => {
+  it("reads bullish/bearish from the histogram sign, neutral when empty", () => {
+    expect(macdSignal([])).toBe("neutral");
+    expect(macdSignal([{ time: 0, macd: 1, signal: 0.5, histogram: 0.5 }])).toBe("bullish");
+    expect(macdSignal([{ time: 0, macd: 0.5, signal: 1, histogram: -0.5 }])).toBe("bearish");
+    expect(macdSignal([{ time: 0, macd: 1, signal: 1, histogram: 0 }])).toBe("neutral");
   });
 });
 
