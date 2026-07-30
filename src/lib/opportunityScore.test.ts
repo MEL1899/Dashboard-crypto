@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { computeConfluenceScore, computeOpportunityScore, type TimeframeSignal } from "./opportunityScore";
-import type { Timeframe } from "../types";
+import {
+  computeConfluenceScore,
+  computeOpportunityScore,
+  type SignalTimeframe,
+  type TimeframeSignal,
+} from "./opportunityScore";
 
 describe("computeOpportunityScore", () => {
   it("stays neutral when every signal is neutral", () => {
@@ -41,7 +45,7 @@ describe("computeOpportunityScore", () => {
   });
 });
 
-function bySignal(h1: TimeframeSignal, h4: TimeframeSignal, d1: TimeframeSignal): Record<Timeframe, TimeframeSignal> {
+function bySignal(h1: TimeframeSignal, h4: TimeframeSignal, d1: TimeframeSignal): Record<SignalTimeframe, TimeframeSignal> {
   return { "1h": h1, "4h": h4, "1d": d1 };
 }
 

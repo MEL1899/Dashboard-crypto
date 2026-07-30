@@ -1,15 +1,15 @@
 import { useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { Info } from "lucide-react";
-import type { BollingerBands, Candle, MarketToken, Timeframe } from "../types";
+import type { BollingerBands, Candle, MarketToken } from "../types";
 import { bbSignal } from "../lib/indicators";
-import type { BbPosition, MacdSignal } from "../lib/opportunityScore";
+import type { BbPosition, MacdSignal, SignalTimeframe } from "../lib/opportunityScore";
 import type { TokenSignals } from "../hooks/useWatchlistSignals";
 import type { Currency } from "../lib/currency";
 import { Badge, Card, formatMoney, formatPrice, ScoreBadge } from "./common";
 
-const TIMEFRAME_LABEL: Record<Timeframe, string> = { "1h": "1H", "4h": "4H", "1d": "1D" };
-const TIMEFRAME_ORDER: Timeframe[] = ["1h", "4h", "1d"];
+const TIMEFRAME_LABEL: Record<SignalTimeframe, string> = { "1h": "1H", "4h": "4H", "1d": "1D" };
+const TIMEFRAME_ORDER: SignalTimeframe[] = ["1h", "4h", "1d"];
 
 type Tone = "up" | "down" | "neutral";
 
@@ -50,7 +50,7 @@ function ToneText({ tone, children }: { tone: Tone; children: ReactNode }) {
 interface IndicatorRow {
   label: string;
   hint: string;
-  render: (signal: TokenSignals["byTimeframe"][Timeframe]) => ReactNode;
+  render: (signal: TokenSignals["byTimeframe"][SignalTimeframe]) => ReactNode;
 }
 
 const INDICATOR_ROWS: IndicatorRow[] = [

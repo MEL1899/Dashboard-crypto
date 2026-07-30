@@ -15,15 +15,15 @@ import {
   type BbPosition,
   type MacdSignal,
   type OpportunityScoreResult,
+  type SignalTimeframe,
   type TimeframeSignal,
 } from "../lib/opportunityScore";
-import type { Timeframe } from "../types";
 
 export interface TokenSignals {
   /** RSI/MACD/Bollinger/volume for each of the 3 timeframes — the raw
    * inputs the confluence score below is built from, exposed so the UI can
    * show exactly what went into the number instead of just the result. */
-  byTimeframe: Record<Timeframe, TimeframeSignal>;
+  byTimeframe: Record<SignalTimeframe, TimeframeSignal>;
   /** Multi-timeframe confluence score — identical wherever it's shown for
    * this token, independent of whatever timeframe the chart has open. */
   score: OpportunityScoreResult;
@@ -31,12 +31,12 @@ export interface TokenSignals {
   isDemo: boolean;
 }
 
-const TIMEFRAMES: Timeframe[] = ["1h", "4h", "1d"];
+const TIMEFRAMES: SignalTimeframe[] = ["1h", "4h", "1d"];
 const RETRY_INTERVAL_MS = 60_000;
 
 async function fetchOneTimeframeSignal(
   tokenId: string,
-  timeframe: Timeframe,
+  timeframe: SignalTimeframe,
   apiKey?: string,
 ): Promise<TimeframeSignal | null> {
   try {
@@ -63,7 +63,7 @@ async function fetchOneTimeframeSignal(
 }
 
 function buildTokenSignals(
-  byTimeframe: Record<Timeframe, TimeframeSignal>,
+  byTimeframe: Record<SignalTimeframe, TimeframeSignal>,
   isDemo: boolean,
 ): TokenSignals {
   return {
@@ -84,7 +84,7 @@ async function fetchTokenSignals(tokenId: string, apiKey?: string): Promise<Toke
   );
 
   let isDemo = false;
-  const byTimeframe = {} as Record<Timeframe, TimeframeSignal>;
+  const byTimeframe = {} as Record<SignalTimeframe, TimeframeSignal>;
   TIMEFRAMES.forEach((tf, i) => {
     const result = results[i];
     if (result) {

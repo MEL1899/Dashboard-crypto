@@ -45,6 +45,8 @@ const TIMEFRAME_OPTIONS: { label: string; value: Timeframe }[] = [
   { label: "1H", value: "1h" },
   { label: "4H", value: "4h" },
   { label: "1D", value: "1d" },
+  { label: "1S", value: "1w" },
+  { label: "1M", value: "1M" },
 ];
 
 type Tab = "market" | "wallet";

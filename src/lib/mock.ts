@@ -10,7 +10,7 @@ import type {
 } from "../types";
 import type { WalletSnapshot } from "./etherscan";
 import { bbSignal, calcBollingerBands, calcMACD, calcRSI, isVolumeSpike, macdSignal } from "./indicators";
-import type { MacdSignal, BbPosition } from "./opportunityScore";
+import type { MacdSignal, BbPosition, SignalTimeframe } from "./opportunityScore";
 
 // Deterministic PRNG so demo mode looks the same across reloads/screenshots.
 function mulberry32(seed: number) {
@@ -102,6 +102,8 @@ const TIMEFRAME_MOCK_CONFIG: Record<Timeframe, { points: number; stepSeconds: nu
   "1h": { points: 168, stepSeconds: 3600 },
   "4h": { points: 180, stepSeconds: 4 * 3600 },
   "1d": { points: 180, stepSeconds: 86400 },
+  "1w": { points: 156, stepSeconds: 7 * 86400 },
+  "1M": { points: 96, stepSeconds: 30 * 86400 },
 };
 
 export function mockCandles(tokenId: string, timeframe: Timeframe): Candle[] {
@@ -151,8 +153,8 @@ export function mockCandles(tokenId: string, timeframe: Timeframe): Candle[] {
  */
 export function mockSignalsByTimeframe(
   tokenId: string,
-): Record<Timeframe, { rsi: number; macd: MacdSignal; bbPosition: BbPosition; volumeSpike: boolean }> {
-  const signalForTimeframe = (timeframe: Timeframe) => {
+): Record<SignalTimeframe, { rsi: number; macd: MacdSignal; bbPosition: BbPosition; volumeSpike: boolean }> {
+  const signalForTimeframe = (timeframe: SignalTimeframe) => {
     const candles = mockCandles(tokenId, timeframe);
     const rsiSeries = calcRSI(candles);
     const bbSeries = calcBollingerBands(candles);

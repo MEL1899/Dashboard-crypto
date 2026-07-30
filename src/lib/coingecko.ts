@@ -163,6 +163,8 @@ const TIMEFRAME_CONFIG: Record<Timeframe, { lookbackDays: number; bucketSeconds:
   "1h": { lookbackDays: 7, bucketSeconds: 3600 },
   "4h": { lookbackDays: 30, bucketSeconds: 4 * 3600 },
   "1d": { lookbackDays: 180, bucketSeconds: 86400 },
+  "1w": { lookbackDays: 730, bucketSeconds: 7 * 86400 },
+  "1M": { lookbackDays: 1825, bucketSeconds: 30 * 86400 },
 };
 
 export async function fetchCandlesForTimeframe(

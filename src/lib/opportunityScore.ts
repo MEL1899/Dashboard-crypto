@@ -1,5 +1,12 @@
 import type { ScoreLevel } from "../components/common";
-import type { Timeframe } from "../types";
+
+/**
+ * The 3 fixed timeframes the confluence score is always built from —
+ * intentionally separate from the chart's `Timeframe` (types/index.ts),
+ * which can offer more granularities (1w, 1M, ...) for display without the
+ * score's math needing to change to match.
+ */
+export type SignalTimeframe = "1h" | "4h" | "1d";
 
 export type MacdSignal = "bullish" | "bearish" | "neutral";
 export type BbPosition = "above-upper" | "below-lower" | "inside";
@@ -115,9 +122,9 @@ export interface TimeframeSignal {
  * alone.
  */
 export function computeConfluenceScore(
-  byTimeframe: Record<Timeframe, TimeframeSignal>,
+  byTimeframe: Record<SignalTimeframe, TimeframeSignal>,
 ): OpportunityScoreResult {
-  const timeframes: Timeframe[] = ["1h", "4h", "1d"];
+  const timeframes: SignalTimeframe[] = ["1h", "4h", "1d"];
   const avgRsi =
     timeframes.reduce((sum, tf) => sum + byTimeframe[tf].rsi, 0) / timeframes.length;
   const macd = majority(timeframes.map((tf) => byTimeframe[tf].macd));

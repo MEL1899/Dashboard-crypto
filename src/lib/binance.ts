@@ -55,6 +55,8 @@ const TIMEFRAME_LIMIT: Record<Timeframe, number> = {
   "1h": 168, // ~7 days
   "4h": 180, // ~30 days
   "1d": 180, // ~6 months
+  "1w": 260, // ~5 years
+  "1M": 120, // ~10 years
 };
 
 // [openTime, open, high, low, close, volume, closeTime, ...]
