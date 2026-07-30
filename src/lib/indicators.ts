@@ -159,3 +159,56 @@ export function isVolumeSpike(candles: Candle[], period = 20): boolean {
   const lastVolume = candles[candles.length - 1].volume;
   return lastVolume / avgVolume >= 1.5;
 }
+
+export type TrendSignal = "up" | "down" | "neutral";
+
+/**
+ * Trend filter using a 20/50-period SMA pair — shorter than the classic
+ * 50/200 so it stays computable on every timeframe this app fetches
+ * (1h only pulls ~168 candles, 1M only ~120, both short of 200). Reads
+ * uptrend when price and the fast SMA both sit above the slow one,
+ * downtrend when both sit below, and neutral on a crossover/transition.
+ * Exists to give RSI/Bollinger's mean-reversion calls some context: an
+ * "oversold" RSI reading in a downtrend can just be a falling knife, not
+ * a dip worth buying.
+ */
+export function trendSignal(candles: Candle[]): TrendSignal {
+  const fast = calcSMA(candles, 20);
+  const slow = calcSMA(candles, 50);
+  if (fast.length === 0 || slow.length === 0) return "neutral";
+  const lastClose = candles[candles.length - 1].close;
+  const lastFast = fast[fast.length - 1].value;
+  const lastSlow = slow[slow.length - 1].value;
+  if (lastClose > lastSlow && lastFast > lastSlow) return "up";
+  if (lastClose < lastSlow && lastFast < lastSlow) return "down";
+  return "neutral";
+}
+
+function periodChangePct(candles: Candle[]): number {
+  if (candles.length < 2) return 0;
+  const first = candles[0].close;
+  const last = candles[candles.length - 1].close;
+  if (first <= 0) return 0;
+  return ((last - first) / first) * 100;
+}
+
+export type RelativeStrengthSignal = "outperforming" | "underperforming" | "inline";
+
+const RELATIVE_STRENGTH_THRESHOLD_PP = 5;
+
+/**
+ * Compares the token's own % change over the fetched window against BTC's
+ * % change over the same window and timeframe — flags whether a move is
+ * the token genuinely standing out, or just following the rest of the
+ * market up or down together (which RSI/MACD/Bollinger alone can't tell
+ * apart, since they only look at the token's own price).
+ */
+export function relativeStrengthSignal(
+  tokenCandles: Candle[],
+  btcCandles: Candle[],
+): RelativeStrengthSignal {
+  const diff = periodChangePct(tokenCandles) - periodChangePct(btcCandles);
+  if (diff >= RELATIVE_STRENGTH_THRESHOLD_PP) return "outperforming";
+  if (diff <= -RELATIVE_STRENGTH_THRESHOLD_PP) return "underperforming";
+  return "inline";
+}

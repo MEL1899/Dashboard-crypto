@@ -62,6 +62,8 @@ describe("computeConfluenceScore", () => {
       macd: "neutral",
       bbPosition: "inside",
       volumeSpike: false,
+      trend: "neutral",
+      relativeStrength: "inline",
     };
     const result = computeConfluenceScore(
       bySignal(
@@ -79,11 +81,11 @@ describe("computeConfluenceScore", () => {
   it("takes the MACD/Bollinger signal that wins the majority of timeframes", () => {
     const result = computeConfluenceScore(
       bySignal(
-        { rsi: 50, macd: "bullish", bbPosition: "inside", volumeSpike: false },
-        { rsi: 50, macd: "bullish", bbPosition: "inside", volumeSpike: false },
-        { rsi: 50, macd: "bullish", bbPosition: "inside", volumeSpike: false },
-        { rsi: 50, macd: "bearish", bbPosition: "inside", volumeSpike: false },
-        { rsi: 50, macd: "bearish", bbPosition: "inside", volumeSpike: false },
+        { rsi: 50, macd: "bullish", bbPosition: "inside", volumeSpike: false, trend: "neutral", relativeStrength: "inline" },
+        { rsi: 50, macd: "bullish", bbPosition: "inside", volumeSpike: false, trend: "neutral", relativeStrength: "inline" },
+        { rsi: 50, macd: "bullish", bbPosition: "inside", volumeSpike: false, trend: "neutral", relativeStrength: "inline" },
+        { rsi: 50, macd: "bearish", bbPosition: "inside", volumeSpike: false, trend: "neutral", relativeStrength: "inline" },
+        { rsi: 50, macd: "bearish", bbPosition: "inside", volumeSpike: false, trend: "neutral", relativeStrength: "inline" },
       ),
     );
     // 3 of 5 timeframes say bullish MACD -> score should move up, not stay neutral.
@@ -94,12 +96,12 @@ describe("computeConfluenceScore", () => {
     const result = computeConfluenceScore(
       bySignal(
         // 1h alone reads strongly bullish
-        { rsi: 20, macd: "bullish", bbPosition: "below-lower", volumeSpike: false },
+        { rsi: 20, macd: "bullish", bbPosition: "below-lower", volumeSpike: false, trend: "neutral", relativeStrength: "inline" },
         // 4h, 1d, 1w and 1M all read bearish
-        { rsi: 60, macd: "bearish", bbPosition: "above-upper", volumeSpike: false },
-        { rsi: 65, macd: "bearish", bbPosition: "above-upper", volumeSpike: false },
-        { rsi: 62, macd: "bearish", bbPosition: "above-upper", volumeSpike: false },
-        { rsi: 68, macd: "bearish", bbPosition: "above-upper", volumeSpike: false },
+        { rsi: 60, macd: "bearish", bbPosition: "above-upper", volumeSpike: false, trend: "neutral", relativeStrength: "inline" },
+        { rsi: 65, macd: "bearish", bbPosition: "above-upper", volumeSpike: false, trend: "neutral", relativeStrength: "inline" },
+        { rsi: 62, macd: "bearish", bbPosition: "above-upper", volumeSpike: false, trend: "neutral", relativeStrength: "inline" },
+        { rsi: 68, macd: "bearish", bbPosition: "above-upper", volumeSpike: false, trend: "neutral", relativeStrength: "inline" },
       ),
     );
     // The 4-timeframe majority (bearish MACD, above-upper BB) should win out
@@ -110,22 +112,75 @@ describe("computeConfluenceScore", () => {
   it("amplifies a Bollinger-band touch when a majority of timeframes confirm it with volume", () => {
     const withoutVolume = computeConfluenceScore(
       bySignal(
-        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false },
-        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false },
-        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false },
-        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false },
-        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false },
+        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false, trend: "neutral", relativeStrength: "inline" },
+        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false, trend: "neutral", relativeStrength: "inline" },
+        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false, trend: "neutral", relativeStrength: "inline" },
+        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false, trend: "neutral", relativeStrength: "inline" },
+        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false, trend: "neutral", relativeStrength: "inline" },
       ),
     );
     const withVolume = computeConfluenceScore(
       bySignal(
-        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: true },
-        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: true },
-        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: true },
-        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false },
-        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false },
+        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: true, trend: "neutral", relativeStrength: "inline" },
+        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: true, trend: "neutral", relativeStrength: "inline" },
+        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: true, trend: "neutral", relativeStrength: "inline" },
+        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false, trend: "neutral", relativeStrength: "inline" },
+        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false, trend: "neutral", relativeStrength: "inline" },
       ),
     );
     expect(withVolume.score).toBeGreaterThan(withoutVolume.score);
+  });
+
+  it("dampens an oversold RSI reading that fights a downtrend, instead of taking it at face value", () => {
+    const base = { macd: "neutral", bbPosition: "inside", volumeSpike: false, relativeStrength: "inline" } as const;
+    const inDowntrend = computeConfluenceScore(
+      bySignal(
+        { ...base, rsi: 20, trend: "down" },
+        { ...base, rsi: 20, trend: "down" },
+        { ...base, rsi: 20, trend: "down" },
+        { ...base, rsi: 20, trend: "down" },
+        { ...base, rsi: 20, trend: "down" },
+      ),
+    );
+    const noTrend = computeConfluenceScore(
+      bySignal(
+        { ...base, rsi: 20, trend: "neutral" },
+        { ...base, rsi: 20, trend: "neutral" },
+        { ...base, rsi: 20, trend: "neutral" },
+        { ...base, rsi: 20, trend: "neutral" },
+        { ...base, rsi: 20, trend: "neutral" },
+      ),
+    );
+    // Same oversold RSI, but fighting a confirmed downtrend should push the
+    // score up by a lot less than it would with no trend context at all — a
+    // falling knife shouldn't score the same as a dip in a flat market. The
+    // downtrend's own -10 then pulls the total below neutral altogether.
+    expect(inDowntrend.score).toBeLessThan(noTrend.score);
+    expect(inDowntrend.score).toBeLessThan(50);
+    expect(noTrend.score).toBeGreaterThan(50);
+  });
+
+  it("rewards outperforming BTC and penalizes underperforming it", () => {
+    const base = { rsi: 50, macd: "neutral", bbPosition: "inside", volumeSpike: false, trend: "neutral" } as const;
+    const outperforming = computeConfluenceScore(
+      bySignal(
+        { ...base, relativeStrength: "outperforming" },
+        { ...base, relativeStrength: "outperforming" },
+        { ...base, relativeStrength: "outperforming" },
+        { ...base, relativeStrength: "inline" },
+        { ...base, relativeStrength: "inline" },
+      ),
+    );
+    const underperforming = computeConfluenceScore(
+      bySignal(
+        { ...base, relativeStrength: "underperforming" },
+        { ...base, relativeStrength: "underperforming" },
+        { ...base, relativeStrength: "underperforming" },
+        { ...base, relativeStrength: "inline" },
+        { ...base, relativeStrength: "inline" },
+      ),
+    );
+    expect(outperforming.score).toBeGreaterThan(50);
+    expect(underperforming.score).toBeLessThan(50);
   });
 });

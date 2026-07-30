@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { Info } from "lucide-react";
 import type { BollingerBands, Candle, MarketToken } from "../types";
 import { bbSignal } from "../lib/indicators";
+import type { RelativeStrengthSignal, TrendSignal } from "../lib/indicators";
 import type { BbPosition, MacdSignal, SignalTimeframe } from "../lib/opportunityScore";
 import type { TokenSignals } from "../hooks/useWatchlistSignals";
 import type { Currency } from "../lib/currency";
@@ -25,6 +26,12 @@ const BB_LABEL: Record<BbPosition, string> = {
   "below-lower": "Abaixo",
   inside: "Dentro",
 };
+const TREND_LABEL: Record<TrendSignal, string> = { up: "Alta", down: "Baixa", neutral: "Sem tendência" };
+const RS_LABEL: Record<RelativeStrengthSignal, string> = {
+  outperforming: "Acima do BTC",
+  underperforming: "Abaixo do BTC",
+  inline: "Em linha",
+};
 
 function toneForRsi(value: number): Tone {
   if (value <= 30) return "up";
@@ -36,6 +43,12 @@ function toneForMacd(signal: MacdSignal): Tone {
 }
 function toneForBb(position: BbPosition): Tone {
   return position === "below-lower" ? "up" : position === "above-upper" ? "down" : "neutral";
+}
+function toneForTrend(trend: TrendSignal): Tone {
+  return trend === "up" ? "up" : trend === "down" ? "down" : "neutral";
+}
+function toneForRs(rs: RelativeStrengthSignal): Tone {
+  return rs === "outperforming" ? "up" : rs === "underperforming" ? "down" : "neutral";
 }
 
 function ToneText({ tone, children }: { tone: Tone; children: ReactNode }) {
@@ -79,6 +92,16 @@ const INDICATOR_ROWS: IndicatorRow[] = [
     label: "Volume",
     hint: "confirma (ou não) o movimento",
     render: (s) => <ToneText tone={s.volumeSpike ? "up" : "neutral"}>{s.volumeSpike ? "Alto" : "Normal"}</ToneText>,
+  },
+  {
+    label: "Tendência",
+    hint: "contexto vs. médias móveis (SMA 20/50)",
+    render: (s) => <ToneText tone={toneForTrend(s.trend)}>{TREND_LABEL[s.trend]}</ToneText>,
+  },
+  {
+    label: "Força relativa",
+    hint: "desempenho comparado ao BTC",
+    render: (s) => <ToneText tone={toneForRs(s.relativeStrength)}>{RS_LABEL[s.relativeStrength]}</ToneText>,
   },
 ];
 
@@ -184,7 +207,7 @@ export function MarketOverview({
               O score combina os 5 timeframes do gráfico (1H, 4H, 1D, 1S e 1M) de cada
               indicador, não só o que está aberto no gráfico — por isso o número é o mesmo aqui e
               na tabela, independente do timeframe selecionado abaixo. Começa neutro em{" "}
-              <strong className="text-[var(--color-text)]">50</strong> e é ajustado por 3
+              <strong className="text-[var(--color-text)]">50</strong> e é ajustado por 5
               indicadores técnicos — nenhum deles sozinho consegue levar o resultado a um
               extremo, só a confluência entre eles:
             </p>
@@ -197,7 +220,9 @@ export function MarketOverview({
                 a 100. Abaixo de 30 é considerado sobrevendido (favorece compra); acima de 70,
                 sobrecomprado (favorece venda). Usamos a{" "}
                 <strong className="text-[var(--color-text)]">média entre os 5 timeframes</strong>
-                ; quanto mais distante de 50, maior o ajuste no score.
+                ; quanto mais distante de 50, maior o ajuste no score — mas esse ajuste vale só
+                40% quando vai contra a Tendência abaixo (ex.: RSI sobrevendido numa queda forte
+                conta menos, pra não confundir "pechincha" com "faca caindo").
               </li>
               <li>
                 <strong className="text-[var(--color-text)]">MACD (12/26/9)</strong> — compara
@@ -221,7 +246,23 @@ export function MarketOverview({
                 toca uma das bandas de Bollinger (suporte ou resistência) com volume pelo menos
                 50% acima da média dos últimos 20 períodos na maioria dos 5 timeframes, isso é
                 tratado como confirmação do movimento: os +15/−15 da banda viram{" "}
-                <strong className="text-[var(--color-text)]">+20/−20</strong>.
+                <strong className="text-[var(--color-text)]">+18/−18</strong> — um ajuste pequeno
+                de propósito, já que esse é o sinal mais ruidoso dos 5 (um único limiar de volume
+                dispara fácil em moedas de menor liquidez).
+              </li>
+              <li>
+                <strong className="text-[var(--color-text)]">Tendência (SMA 20/50)</strong> —
+                compara o preço e a média de 20 períodos contra a média de 50: acima das duas é
+                tendência de alta (+10), abaixo das duas é tendência de baixa (−10). Serve de
+                contexto pros outros indicadores em vez de olhar o RSI/Bollinger isolados — é o
+                que reduz o ajuste do RSI quando ele vai contra a tendência.
+              </li>
+              <li>
+                <strong className="text-[var(--color-text)]">Força relativa vs. BTC</strong> —
+                compara a variação de preço do ativo com a do Bitcoin no mesmo período. Se o ativo
+                sobe ou cai bem mais que o BTC (diferença de 5 pontos percentuais ou mais), soma ou
+                subtrai 8 pontos — diferencia um ativo que está se destacando por conta própria de
+                um que só está seguindo o mercado.
               </li>
             </ul>
             <p>

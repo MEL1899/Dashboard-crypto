@@ -44,7 +44,14 @@ function RsiPill({ value }: { value: number }) {
   );
 }
 
-const NEUTRAL_TIMEFRAME_SIGNAL = { rsi: 50, macd: "neutral", bbPosition: "inside", volumeSpike: false } as const;
+const NEUTRAL_TIMEFRAME_SIGNAL = {
+  rsi: 50,
+  macd: "neutral",
+  bbPosition: "inside",
+  volumeSpike: false,
+  trend: "neutral",
+  relativeStrength: "inline",
+} as const;
 const FALLBACK_SIGNALS: TokenSignals = {
   byTimeframe: {
     "1h": NEUTRAL_TIMEFRAME_SIGNAL,

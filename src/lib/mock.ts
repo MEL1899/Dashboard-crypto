@@ -9,7 +9,18 @@ import type {
   WalletTransaction,
 } from "../types";
 import type { WalletSnapshot } from "./etherscan";
-import { bbSignal, calcBollingerBands, calcMACD, calcRSI, isVolumeSpike, macdSignal } from "./indicators";
+import {
+  bbSignal,
+  calcBollingerBands,
+  calcMACD,
+  calcRSI,
+  isVolumeSpike,
+  macdSignal,
+  relativeStrengthSignal,
+  trendSignal,
+  type RelativeStrengthSignal,
+  type TrendSignal,
+} from "./indicators";
 import type { MacdSignal, BbPosition, SignalTimeframe } from "./opportunityScore";
 
 // Deterministic PRNG so demo mode looks the same across reloads/screenshots.
@@ -151,9 +162,17 @@ export function mockCandles(tokenId: string, timeframe: Timeframe): Candle[] {
  * a token's chart also happens to be in fallback mode, its numbers here
  * agree with what the chart shows instead of coming from unrelated PRNGs.
  */
-export function mockSignalsByTimeframe(
-  tokenId: string,
-): Record<SignalTimeframe, { rsi: number; macd: MacdSignal; bbPosition: BbPosition; volumeSpike: boolean }> {
+export function mockSignalsByTimeframe(tokenId: string): Record<
+  SignalTimeframe,
+  {
+    rsi: number;
+    macd: MacdSignal;
+    bbPosition: BbPosition;
+    volumeSpike: boolean;
+    trend: TrendSignal;
+    relativeStrength: RelativeStrengthSignal;
+  }
+> {
   const signalForTimeframe = (timeframe: SignalTimeframe) => {
     const candles = mockCandles(tokenId, timeframe);
     const rsiSeries = calcRSI(candles);
@@ -165,6 +184,11 @@ export function mockSignalsByTimeframe(
       macd: macdSignal(calcMACD(candles)),
       bbPosition: lastCandle && lastBb ? bbSignal(lastCandle.close, lastBb) : ("inside" as const),
       volumeSpike: isVolumeSpike(candles),
+      trend: trendSignal(candles),
+      relativeStrength:
+        tokenId === "bitcoin"
+          ? ("inline" as const)
+          : relativeStrengthSignal(candles, mockCandles("bitcoin", timeframe)),
     };
   };
   return {

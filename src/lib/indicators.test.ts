@@ -8,7 +8,9 @@ import {
   calcVolumeSeries,
   isVolumeSpike,
   macdSignal,
+  relativeStrengthSignal,
   rsiSignal,
+  trendSignal,
 } from "./indicators";
 import type { Candle } from "../types";
 
@@ -160,5 +162,45 @@ describe("bbSignal", () => {
     expect(bbSignal(85, band)).toBe("below-lower");
     expect(bbSignal(90, band)).toBe("below-lower");
     expect(bbSignal(100, band)).toBe("inside");
+  });
+});
+
+describe("trendSignal", () => {
+  it("returns neutral when there isn't enough history for the 50-period SMA", () => {
+    expect(trendSignal(makeCandles(Array(30).fill(50)))).toBe("neutral");
+  });
+
+  it("reads uptrend when price and the fast SMA both sit above the slow SMA", () => {
+    const closes = Array.from({ length: 60 }, (_, i) => 50 + i); // steady climb
+    expect(trendSignal(makeCandles(closes))).toBe("up");
+  });
+
+  it("reads downtrend when price and the fast SMA both sit below the slow SMA", () => {
+    const closes = Array.from({ length: 60 }, (_, i) => 200 - i); // steady decline
+    expect(trendSignal(makeCandles(closes))).toBe("down");
+  });
+
+  it("reads neutral on a flat series (no separation between fast/slow SMA)", () => {
+    expect(trendSignal(makeCandles(Array(60).fill(100)))).toBe("neutral");
+  });
+});
+
+describe("relativeStrengthSignal", () => {
+  it("reads outperforming when the token gains much more than BTC over the window", () => {
+    const token = makeCandles([100, 130]); // +30%
+    const btc = makeCandles([100, 105]); // +5%
+    expect(relativeStrengthSignal(token, btc)).toBe("outperforming");
+  });
+
+  it("reads underperforming when the token loses much more than BTC over the window", () => {
+    const token = makeCandles([100, 70]); // -30%
+    const btc = makeCandles([100, 100]); // flat
+    expect(relativeStrengthSignal(token, btc)).toBe("underperforming");
+  });
+
+  it("reads inline when the token moves about the same as BTC", () => {
+    const token = makeCandles([100, 103]);
+    const btc = makeCandles([100, 101]);
+    expect(relativeStrengthSignal(token, btc)).toBe("inline");
   });
 });

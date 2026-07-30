@@ -8,6 +8,8 @@ import {
   calcRSI,
   isVolumeSpike,
   macdSignal,
+  relativeStrengthSignal,
+  trendSignal,
 } from "../lib/indicators";
 import { mockSignalsByTimeframe } from "../lib/mock";
 import {
@@ -18,6 +20,9 @@ import {
   type SignalTimeframe,
   type TimeframeSignal,
 } from "../lib/opportunityScore";
+import type { Candle } from "../types";
+
+const BTC_TOKEN_ID = "bitcoin";
 
 export interface TokenSignals {
   /** RSI/MACD/Bollinger/volume for each of the 3 timeframes — the raw
@@ -34,9 +39,40 @@ export interface TokenSignals {
 const TIMEFRAMES: SignalTimeframe[] = ["1h", "4h", "1d", "1w", "1M"];
 const RETRY_INTERVAL_MS = 60_000;
 
+/** Fetches BTC's own candles for a timeframe, used as the relative-strength
+ * baseline for every other token — fetched once per refresh and shared
+ * across the whole watchlist rather than once per token. */
+async function fetchBtcCandles(
+  timeframe: SignalTimeframe,
+  apiKey?: string,
+): Promise<Candle[] | null> {
+  try {
+    const symbol = symbolForToken(BTC_TOKEN_ID);
+    return symbol
+      ? await fetchKlines(symbol, timeframe)
+      : await fetchCandlesForTimeframe(BTC_TOKEN_ID, timeframe, apiKey);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchBtcCandlesByTimeframe(
+  apiKey?: string,
+): Promise<Partial<Record<SignalTimeframe, Candle[]>>> {
+  const entries = await Promise.all(
+    TIMEFRAMES.map(async (tf) => [tf, await fetchBtcCandles(tf, apiKey)] as const),
+  );
+  const out: Partial<Record<SignalTimeframe, Candle[]>> = {};
+  for (const [tf, candles] of entries) {
+    if (candles) out[tf] = candles;
+  }
+  return out;
+}
+
 async function fetchOneTimeframeSignal(
   tokenId: string,
   timeframe: SignalTimeframe,
+  btcCandles: Candle[] | null,
   apiKey?: string,
 ): Promise<TimeframeSignal | null> {
   try {
@@ -56,6 +92,12 @@ async function fetchOneTimeframeSignal(
       macd,
       bbPosition,
       volumeSpike: isVolumeSpike(candles),
+      trend: trendSignal(candles),
+      // BTC is the benchmark, not compared against itself.
+      relativeStrength:
+        tokenId === BTC_TOKEN_ID || !btcCandles
+          ? "inline"
+          : relativeStrengthSignal(candles, btcCandles),
     };
   } catch {
     return null;
@@ -77,10 +119,14 @@ function mockTokenSignals(tokenId: string): TokenSignals {
   return buildTokenSignals(mockSignalsByTimeframe(tokenId), true);
 }
 
-async function fetchTokenSignals(tokenId: string, apiKey?: string): Promise<TokenSignals> {
+async function fetchTokenSignals(
+  tokenId: string,
+  btcCandlesByTf: Partial<Record<SignalTimeframe, Candle[]>>,
+  apiKey?: string,
+): Promise<TokenSignals> {
   const fallback = mockSignalsByTimeframe(tokenId);
   const results = await Promise.all(
-    TIMEFRAMES.map((tf) => fetchOneTimeframeSignal(tokenId, tf, apiKey)),
+    TIMEFRAMES.map((tf) => fetchOneTimeframeSignal(tokenId, tf, btcCandlesByTf[tf] ?? null, apiKey)),
   );
 
   let isDemo = false;
@@ -144,8 +190,11 @@ export function useWatchlistSignals(ids: string[], apiKey?: string) {
       });
       if (idsToFetch.length === 0) return;
 
+      // Fetched once per refresh and reused for every token below, instead
+      // of once per token, since it's the same BTC baseline for all of them.
+      const btcCandlesByTf = await fetchBtcCandlesByTimeframe(apiKey);
       const entries = await Promise.all(
-        idsToFetch.map(async (id) => [id, await fetchTokenSignals(id, apiKey)] as const),
+        idsToFetch.map(async (id) => [id, await fetchTokenSignals(id, btcCandlesByTf, apiKey)] as const),
       );
       if (cancelled) return;
       setData((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
