@@ -6,6 +6,7 @@ import type { MarketToken } from "../types";
 import type { Currency } from "../lib/currency";
 import {
   POSITION_SIZE_PCT,
+  ROUND_TRIP_COST_PCT,
   type BacktestMode,
   type BacktestResult,
   type BacktestTimeframe,
@@ -89,6 +90,7 @@ interface SelectedDetail {
   tokenId: string;
   symbol: string;
   result: BacktestResult;
+  baseline: BacktestResult;
   isDemo: boolean;
   timeframe: BacktestTimeframe;
 }
@@ -105,6 +107,83 @@ const STRATEGY_OPTIONS: { label: string; value: Strategy }[] = [
 ];
 
 const RSI_PERIOD_OPTIONS = [7, 14, 21];
+
+interface EdgeVerdict {
+  /** Tokens where the strategy beat its own coin-flip control group. */
+  beatBaseline: number;
+  total: number;
+  strategyAvgReturnPct: number;
+  baselineAvgReturnPct: number;
+  /** Tokens whose average trade is profitable after costs. */
+  positiveExpectancy: number;
+}
+
+/** The honest scoreboard: does the signal actually beat random entries
+ * with the same risk management? If not, the risk management is doing the
+ * work and the indicators are decoration. */
+function computeEdgeVerdict(summaries: { result: BacktestResult; baseline: BacktestResult }[]): EdgeVerdict | null {
+  const scored = summaries.filter((s) => s.result.trades.length > 0);
+  if (scored.length === 0) return null;
+  return {
+    beatBaseline: scored.filter((s) => s.result.strategyReturnPct > s.baseline.strategyReturnPct).length,
+    total: scored.length,
+    strategyAvgReturnPct: scored.reduce((sum, s) => sum + s.result.strategyReturnPct, 0) / scored.length,
+    baselineAvgReturnPct: scored.reduce((sum, s) => sum + s.baseline.strategyReturnPct, 0) / scored.length,
+    positiveExpectancy: scored.filter((s) => s.result.expectancyPct > 0).length,
+  };
+}
+
+function EdgeVerdictBanner({ verdict }: { verdict: EdgeVerdict }) {
+  const beatsRandom = verdict.beatBaseline > verdict.total / 2;
+  const margin = verdict.strategyAvgReturnPct - verdict.baselineAvgReturnPct;
+
+  return (
+    <div
+      className={clsx(
+        "rounded-lg border p-3",
+        beatsRandom
+          ? "border-[var(--color-up)]/40 bg-[var(--color-up)]/10"
+          : "border-[var(--color-down)]/40 bg-[var(--color-down)]/10",
+      )}
+    >
+      <div className="text-sm font-semibold text-[var(--color-text)]">
+        {beatsRandom ? "O sinal superou entradas aleatórias" : "O sinal NÃO superou entradas aleatórias"}
+      </div>
+      <div className="mt-1 text-xs leading-relaxed text-[var(--color-text-dim)]">
+        Venceu em <span className="num-mono font-medium">{verdict.beatBaseline}</span> de{" "}
+        <span className="num-mono font-medium">{verdict.total}</span> moedas. Retorno médio da estratégia{" "}
+        <span
+          className={clsx(
+            "num-mono font-medium",
+            verdict.strategyAvgReturnPct >= 0 ? "text-[var(--color-up)]" : "text-[var(--color-down)]",
+          )}
+        >
+          {verdict.strategyAvgReturnPct >= 0 ? "+" : ""}
+          {verdict.strategyAvgReturnPct.toFixed(1)}%
+        </span>{" "}
+        contra{" "}
+        <span
+          className={clsx(
+            "num-mono font-medium",
+            verdict.baselineAvgReturnPct >= 0 ? "text-[var(--color-up)]" : "text-[var(--color-down)]",
+          )}
+        >
+          {verdict.baselineAvgReturnPct >= 0 ? "+" : ""}
+          {verdict.baselineAvgReturnPct.toFixed(1)}%
+        </span>{" "}
+        do acaso ({margin >= 0 ? "+" : ""}
+        {margin.toFixed(1)} p.p. de diferença).{" "}
+        <span className="num-mono font-medium">{verdict.positiveExpectancy}</span> de{" "}
+        <span className="num-mono font-medium">{verdict.total}</span> têm expectativa positiva por trade.
+      </div>
+      <div className="mt-2 text-xs leading-relaxed text-[var(--color-text-dim)]">
+        {beatsRandom
+          ? "Indício de edge — mas confirme com mais trades e em outra janela antes de confiar. Amostras pequenas produzem vencedores por sorte."
+          : "Sem edge demonstrado: nesse período, jogar moeda com a mesma gestão de risco daria resultado igual ou melhor. Qualquer lucro veio do stop/alvo, não dos indicadores."}
+      </div>
+    </div>
+  );
+}
 
 interface PortfolioTotal {
   investedPerToken: number;
@@ -157,7 +236,9 @@ function PortfolioTotalBanner({ total, currency }: { total: PortfolioTotal; curr
   );
 }
 
-function ComparisonTable<T extends { tokenId: string; symbol: string; result: BacktestResult; isDemo: boolean }>({
+function ComparisonTable<
+  T extends { tokenId: string; symbol: string; result: BacktestResult; baseline: BacktestResult; isDemo: boolean },
+>({
   summaries,
   selectedTokenId,
   currency,
@@ -183,10 +264,12 @@ function ComparisonTable<T extends { tokenId: string; symbol: string; result: Ba
           <tr>
             <th className="py-1.5 pr-3 font-medium">Ativo</th>
             <th className="py-1.5 pr-3 font-medium">Estratégia</th>
+            <th className="py-1.5 pr-3 font-medium">Acaso (controle)</th>
             <th className="py-1.5 pr-3 font-medium">Simulação (base {formatPrice(100, currency)})</th>
             <th className="py-1.5 pr-3 font-medium">Buy & Hold (ref.)</th>
             <th className="py-1.5 pr-3 font-medium">Trades</th>
-            <th className="py-1.5 pr-3 font-medium">Acerto</th>
+            <th className="py-1.5 pr-3 font-medium">Acerto / mín.</th>
+            <th className="py-1.5 pr-3 font-medium">Exp./trade</th>
             <th className="py-1.5 pr-3 font-medium">Drawdown</th>
           </tr>
         </thead>
@@ -213,6 +296,21 @@ function ComparisonTable<T extends { tokenId: string; symbol: string; result: Ba
                 {s.result.strategyReturnPct >= 0 ? "+" : ""}
                 {s.result.strategyReturnPct.toFixed(1)}%
               </td>
+              {/* The control group sits right next to the strategy on
+                  purpose: beating it is the actual bar, and a green
+                  strategy number next to a greener random number should
+                  look like the disappointment it is. */}
+              <td
+                className={clsx(
+                  "num-mono py-1.5 pr-3",
+                  s.result.strategyReturnPct > s.baseline.strategyReturnPct
+                    ? "text-[var(--color-text-dim)]"
+                    : "font-medium text-[var(--color-down)]",
+                )}
+              >
+                {s.baseline.strategyReturnPct >= 0 ? "+" : ""}
+                {s.baseline.strategyReturnPct.toFixed(1)}%
+              </td>
               <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
                 {formatPrice(100, currency)} → {formatPrice(100 + s.result.strategyReturnPct, currency)}
               </td>
@@ -222,7 +320,30 @@ function ComparisonTable<T extends { tokenId: string; symbol: string; result: Ba
               </td>
               <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">{s.result.trades.length}</td>
               <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
-                {s.result.trades.length > 0 ? `${s.result.winRate.toFixed(0)}%` : "-"}
+                {s.result.trades.length > 0 ? (
+                  <span
+                    className={
+                      s.result.winRate >= s.result.breakevenWinRate
+                        ? "text-[var(--color-up)]"
+                        : "text-[var(--color-down)]"
+                    }
+                  >
+                    {s.result.winRate.toFixed(0)}%
+                  </span>
+                ) : (
+                  "-"
+                )}
+                {s.result.trades.length > 0 && ` / ${s.result.breakevenWinRate.toFixed(0)}%`}
+              </td>
+              <td
+                className={clsx(
+                  "num-mono py-1.5 pr-3 font-medium",
+                  s.result.expectancyPct >= 0 ? "text-[var(--color-up)]" : "text-[var(--color-down)]",
+                )}
+              >
+                {s.result.trades.length > 0
+                  ? `${s.result.expectancyPct >= 0 ? "+" : ""}${s.result.expectancyPct.toFixed(2)}%`
+                  : "-"}
               </td>
               <td className="num-mono py-1.5 pr-3 text-[var(--color-down)]">
                 -{s.result.maxDrawdownPct.toFixed(1)}%
@@ -288,6 +409,7 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
       tokenId: s.tokenId,
       symbol: s.symbol,
       result: s.result,
+      baseline: s.baseline,
       isDemo: s.isDemo,
       timeframe: lastRun.timeframe,
     });
@@ -311,12 +433,14 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
           são recalibrados pra cada um. Cada entrada já sai com stop-loss e take-profit
           calculados a partir do suporte/resistência recente (mínima/máxima das últimas 20
           velas), e só {POSITION_SIZE_PCT}% do capital fica alocado por trade — o resto fica de
-          fora, então um trade ruim nunca zera a conta sozinho. Usa só um timeframe por vez —
-          não a confluência completa de 5 timeframes do app — e não modela taxas nem slippage.
-          Buy & hold aparece como referência de contexto, não como meta: o que importa aqui é o
-          retorno absoluto da estratégia. Trate como um teste de direção do sinal, não uma
-          réplica exata do score ao vivo, e lembre que desempenho passado não garante resultado
-          futuro.
+          fora, então um trade ruim nunca zera a conta sozinho. Todo trade paga{" "}
+          {ROUND_TRIP_COST_PCT.toFixed(2)}% de custo de ida e volta (taxa + slippage), então
+          resultados de alta frequência não aparecem inflados aqui. Usa só um timeframe por vez
+          — não a confluência completa de 5 timeframes do app. Buy & hold aparece como
+          referência de contexto, mas a barra que importa é o "Acaso": se o sinal não vence
+          entradas aleatórias com a mesma gestão de risco, ele não demonstrou edge nenhum.
+          Trate como um teste de direção do sinal, não uma réplica exata do score ao vivo, e
+          lembre que desempenho passado não garante resultado futuro.
         </p>
 
         {tokens.length === 0 ? (
@@ -394,10 +518,23 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
 
       {lastRun && activeBatch.summaries.length > 0 && (
         <Card title={`Comparação da watchlist — ${lastRun.label}`}>
-          <p className="mb-2 text-xs text-[var(--color-text-dim)]">
+          <p className="mb-2 text-xs leading-relaxed text-[var(--color-text-dim)]">
             Ordenado pelo retorno absoluto da estratégia — clique numa linha pra ver os trades em
-            detalhe abaixo.
+            detalhe abaixo. "Acaso" é o grupo de controle: entradas por cara-ou-coroa nas mesmas
+            velas, com stop, alvo, alocação e custos idênticos — bater isso é a barra real, e
+            fica vermelho quando a estratégia perde pro acaso. "Acerto / mín." compara a taxa de
+            acerto com a mínima necessária pra empatar dado o tamanho médio dos ganhos e perdas.
+            "Exp./trade" é o resultado médio por operação já com custos: se for negativa, cada
+            trade a mais destrói capital, por melhor que o acerto pareça.
           </p>
+          {(() => {
+            const verdict = computeEdgeVerdict(activeBatch.summaries);
+            return verdict ? (
+              <div className="mb-3">
+                <EdgeVerdictBanner verdict={verdict} />
+              </div>
+            ) : null;
+          })()}
           {(() => {
             const total = computePortfolioTotal(activeBatch.summaries);
             return total ? <PortfolioTotalBanner total={total} currency={currency} /> : null;
@@ -443,11 +580,33 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
               tone={selected.result.buyHoldReturnPct >= 0 ? "up" : "down"}
             />
             <StatTile label="Nº de trades" value={String(selected.result.trades.length)} />
-            <StatTile label="Taxa de acerto" value={`${selected.result.winRate.toFixed(0)}%`} />
+            <StatTile
+              label={`Acerto (mín. ${selected.result.breakevenWinRate.toFixed(0)}%)`}
+              value={`${selected.result.winRate.toFixed(0)}%`}
+              tone={selected.result.winRate >= selected.result.breakevenWinRate ? "up" : "down"}
+            />
             <StatTile
               label="Maior drawdown"
               value={`-${selected.result.maxDrawdownPct.toFixed(1)}%`}
               tone="down"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <StatTile
+              label="Expectativa por trade"
+              value={`${selected.result.expectancyPct >= 0 ? "+" : ""}${selected.result.expectancyPct.toFixed(2)}%`}
+              tone={selected.result.expectancyPct >= 0 ? "up" : "down"}
+            />
+            <StatTile
+              label="Custo total pago"
+              value={`-${selected.result.totalCostPct.toFixed(2)}%`}
+              tone="down"
+            />
+            <StatTile
+              label="Acaso, mesmo risco (controle)"
+              value={`${selected.baseline.strategyReturnPct >= 0 ? "+" : ""}${selected.baseline.strategyReturnPct.toFixed(1)}%`}
+              tone={selected.result.strategyReturnPct > selected.baseline.strategyReturnPct ? "neutral" : "down"}
             />
           </div>
 

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { POSITION_SIZE_PCT, runBacktest, runRsiOnlyBacktest } from "./backtest";
+import {
+  POSITION_SIZE_PCT,
+  ROUND_TRIP_COST_PCT,
+  runBacktest,
+  runRandomBaseline,
+  runRsiOnlyBacktest,
+} from "./backtest";
 import type { Candle } from "../types";
 
 function makeCandles(closes: number[], startTime = 0, stepSeconds = 86400): Candle[] {
@@ -37,6 +43,9 @@ describe("runBacktest", () => {
       buyHoldReturnPct: 0,
       winRate: 0,
       maxDrawdownPct: 0,
+      expectancyPct: 0,
+      breakevenWinRate: 0,
+      totalCostPct: 0,
     });
   });
 
@@ -70,15 +79,15 @@ describe("runBacktest", () => {
     expect(partialEntries).toEqual(fullEntriesWithinWindow);
   });
 
-  it("each trade's return% matches the long/short formula for its type", () => {
+  it("each trade's return% matches the long/short formula for its type, net of costs", () => {
     const candles = makeCandles(syntheticSeries(150));
     const result = runBacktest(candles, null);
     for (const trade of result.trades) {
-      const expected =
+      const gross =
         trade.type === "long"
           ? ((trade.exitPrice - trade.entryPrice) / trade.entryPrice) * 100
           : ((trade.entryPrice - trade.exitPrice) / trade.entryPrice) * 100;
-      expect(trade.returnPct).toBeCloseTo(expected, 6);
+      expect(trade.returnPct).toBeCloseTo(gross - ROUND_TRIP_COST_PCT, 6);
     }
   });
 
@@ -164,16 +173,22 @@ describe("runBacktest", () => {
     const fourHour = runBacktest(candles, null, "any", "4h");
     const hourly = runBacktest(candles, null, "any", "1h");
     // These bounds mirror STOP_BOUNDS_PCT in backtest.ts — a stop-triggered
-    // trade's |returnPct| should never exceed its timeframe's max, since
-    // the stop always fires at exactly the clamped stop price.
+    // trade loses at most its timeframe's max (the stop always fires at
+    // exactly the clamped stop price) plus the round-trip cost on top.
     for (const trade of daily.trades) {
-      if (trade.exitReason === "stop") expect(Math.abs(trade.returnPct)).toBeLessThanOrEqual(15 + 1e-6);
+      if (trade.exitReason === "stop") {
+        expect(Math.abs(trade.returnPct)).toBeLessThanOrEqual(15 + ROUND_TRIP_COST_PCT + 1e-6);
+      }
     }
     for (const trade of fourHour.trades) {
-      if (trade.exitReason === "stop") expect(Math.abs(trade.returnPct)).toBeLessThanOrEqual(7 + 1e-6);
+      if (trade.exitReason === "stop") {
+        expect(Math.abs(trade.returnPct)).toBeLessThanOrEqual(7 + ROUND_TRIP_COST_PCT + 1e-6);
+      }
     }
     for (const trade of hourly.trades) {
-      if (trade.exitReason === "stop") expect(Math.abs(trade.returnPct)).toBeLessThanOrEqual(3.5 + 1e-6);
+      if (trade.exitReason === "stop") {
+        expect(Math.abs(trade.returnPct)).toBeLessThanOrEqual(3.5 + ROUND_TRIP_COST_PCT + 1e-6);
+      }
     }
   });
 
@@ -182,6 +197,77 @@ describe("runBacktest", () => {
     const withDefault = runBacktest(candles, null);
     const explicit1d = runBacktest(candles, null, "any", "1d");
     expect(withDefault).toEqual(explicit1d);
+  });
+
+  it("charges a round-trip cost on every trade", () => {
+    const candles = makeCandles(syntheticSeries(150));
+    const result = runBacktest(candles, null);
+    expect(result.totalCostPct).toBeCloseTo(result.trades.length * ROUND_TRIP_COST_PCT, 6);
+  });
+
+  it("expectancy is the mean net return per trade, and its sign matches the overall result", () => {
+    const candles = makeCandles(syntheticSeries(150));
+    const result = runBacktest(candles, null);
+    if (result.trades.length === 0) {
+      expect(result.expectancyPct).toBe(0);
+      return;
+    }
+    const mean = result.trades.reduce((s, t) => s + t.returnPct, 0) / result.trades.length;
+    expect(result.expectancyPct).toBeCloseTo(mean, 6);
+    // Equity compounds the same per-trade returns, so a negative average
+    // trade can't produce a winning strategy (and vice versa).
+    if (result.expectancyPct < 0) expect(result.strategyReturnPct).toBeLessThan(0);
+    if (result.expectancyPct > 0) expect(result.strategyReturnPct).toBeGreaterThan(0);
+  });
+
+  it("break-even win rate is the win rate at which average wins exactly pay for average losses", () => {
+    const candles = makeCandles(syntheticSeries(150));
+    const result = runBacktest(candles, null);
+    const winners = result.trades.filter((t) => t.returnPct > 0);
+    const losers = result.trades.filter((t) => t.returnPct <= 0);
+    if (winners.length === 0 || losers.length === 0) return;
+
+    const avgWin = winners.reduce((s, t) => s + t.returnPct, 0) / winners.length;
+    const avgLoss = Math.abs(losers.reduce((s, t) => s + t.returnPct, 0) / losers.length);
+    const p = result.breakevenWinRate / 100;
+    expect(p * avgWin - (1 - p) * avgLoss).toBeCloseTo(0, 6);
+
+    // The whole point of surfacing it: clearing the bar and making money
+    // are the same statement.
+    if (result.winRate > result.breakevenWinRate) expect(result.expectancyPct).toBeGreaterThan(0);
+    if (result.winRate < result.breakevenWinRate) expect(result.expectancyPct).toBeLessThan(0);
+  });
+});
+
+describe("runRandomBaseline", () => {
+  it("is deterministic for a given seed, and different seeds explore differently", () => {
+    const candles = makeCandles(syntheticSeries(300));
+    const a = runRandomBaseline(candles, 0.1, "token-a");
+    const again = runRandomBaseline(candles, 0.1, "token-a");
+    const b = runRandomBaseline(candles, 0.1, "token-b");
+
+    expect(a.strategyReturnPct).toBe(again.strategyReturnPct);
+    expect(a.trades.map((t) => t.entryTime)).toEqual(again.trades.map((t) => t.entryTime));
+    expect(a.trades.map((t) => t.entryTime)).not.toEqual(b.trades.map((t) => t.entryTime));
+  });
+
+  it("trades roughly as often as the requested frequency, so cost drag is comparable", () => {
+    const candles = makeCandles(syntheticSeries(600));
+    const rare = runRandomBaseline(candles, 0.02, "seed");
+    const often = runRandomBaseline(candles, 0.4, "seed");
+    expect(often.trades.length).toBeGreaterThan(rare.trades.length);
+  });
+
+  it("obeys the same risk management as the real strategies", () => {
+    const candles = makeCandles(syntheticSeries(300));
+    const result = runRandomBaseline(candles, 0.15, "seed", "1d");
+    for (const trade of result.trades) {
+      expect(["stop", "target", "signal", "end"]).toContain(trade.exitReason);
+      if (trade.exitReason === "stop") {
+        expect(Math.abs(trade.returnPct)).toBeLessThanOrEqual(15 + ROUND_TRIP_COST_PCT + 1e-6);
+      }
+    }
+    expect(result.totalCostPct).toBeCloseTo(result.trades.length * ROUND_TRIP_COST_PCT, 6);
   });
 });
 
@@ -198,16 +284,16 @@ describe("runRsiOnlyBacktest", () => {
     expect(result.equityCurve.length).toBe(candles.length - 50);
   });
 
-  it("each trade's return% matches the long/short formula for its type, for every RSI period", () => {
+  it("each trade's return% matches the long/short formula for its type, net of costs, for every RSI period", () => {
     const candles = makeCandles(syntheticSeries(150));
     for (const period of [7, 14, 21]) {
       const result = runRsiOnlyBacktest(candles, period);
       for (const trade of result.trades) {
-        const expected =
+        const gross =
           trade.type === "long"
             ? ((trade.exitPrice - trade.entryPrice) / trade.entryPrice) * 100
             : ((trade.entryPrice - trade.exitPrice) / trade.entryPrice) * 100;
-        expect(trade.returnPct).toBeCloseTo(expected, 6);
+        expect(trade.returnPct).toBeCloseTo(gross - ROUND_TRIP_COST_PCT, 6);
       }
     }
   });

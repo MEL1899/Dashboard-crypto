@@ -47,6 +47,18 @@ export interface BacktestResult {
   /** 0-100, percentage of closed trades that were profitable. */
   winRate: number;
   maxDrawdownPct: number;
+  /** Average net return per trade, in % of the traded position. The single
+   * most honest summary of whether the rule has an edge: positive means
+   * each trade is worth taking on average, negative means every extra
+   * trade destroys money no matter how good the win rate looks. */
+  expectancyPct: number;
+  /** Win rate this strategy would need just to break even, given the
+   * average size of its own wins vs losses. Compare against `winRate`:
+   * below it = losing by construction. */
+  breakevenWinRate: number;
+  /** Total round-trip cost (fees + slippage) charged across all trades, in
+   * % of the traded position — how much of the result the exchange ate. */
+  totalCostPct: number;
 }
 
 const EMPTY_RESULT: BacktestResult = {
@@ -56,6 +68,9 @@ const EMPTY_RESULT: BacktestResult = {
   buyHoldReturnPct: 0,
   winRate: 0,
   maxDrawdownPct: 0,
+  expectancyPct: 0,
+  breakevenWinRate: 0,
+  totalCostPct: 0,
 };
 
 /** Candle granularity the backtest can run on — a subset of the app's full
@@ -95,6 +110,20 @@ const MIN_REWARD_RISK_RATIO = 2;
 // out, so one stopped-out trade can only ever cost a bounded slice of the
 // account instead of being able to compound into a full wipeout.
 export const POSITION_SIZE_PCT = 50;
+
+// Real trading isn't free, and pretending it is flatters short-horizon
+// strategies enormously: a rule that trades every other candle can look
+// profitable gross and still bleed to death on fees. Charged per leg, so a
+// full round trip costs twice this.
+//   - Binance spot taker is 0.1%; a market order that has to cross the
+//     spread and walk the book costs more on top, hence the slippage term.
+//   - Both are deliberately on the pessimistic side. A backtest that
+//     survives pessimistic costs is worth something; one that only works
+//     at zero cost is a chart, not a strategy.
+export const FEE_PCT_PER_LEG = 0.1;
+export const SLIPPAGE_PCT_PER_LEG = 0.05;
+/** Full round-trip cost of one trade (entry leg + exit leg). */
+export const ROUND_TRIP_COST_PCT = (FEE_PCT_PER_LEG + SLIPPAGE_PCT_PER_LEG) * 2;
 
 /** "buy" opens/keeps a long, "sell" opens/keeps a short, "hold" leaves
  * whatever position (long, short, or flat) untouched. */
@@ -205,8 +234,11 @@ function simulate(candles: Candle[], signal: SignalFn, timeframe: BacktestTimefr
 
   // Books a closed trade's equity impact and record; does NOT touch
   // `position` itself, so every call site clears it inline right after.
+  // returnPct is net of the full round-trip cost, so every number the UI
+  // shows downstream (per-trade return, equity, win rate, expectancy) is
+  // already what the account would actually have seen.
   function recordTrade(closed: OpenPosition, exitTime: number, exitPrice: number, exitReason: ExitReason) {
-    const returnPct = positionReturnPct(closed, exitPrice);
+    const returnPct = positionReturnPct(closed, exitPrice) - ROUND_TRIP_COST_PCT;
     equity *= equityFactor(returnPct, allocationFraction);
     trades.push({
       type: closed.type,
@@ -280,15 +312,25 @@ function simulate(candles: Candle[], signal: SignalFn, timeframe: BacktestTimefr
     if (drawdown > maxDrawdownPct) maxDrawdownPct = drawdown;
   }
 
-  const wins = trades.filter((t) => t.returnPct > 0).length;
+  const winners = trades.filter((t) => t.returnPct > 0);
+  const losers = trades.filter((t) => t.returnPct <= 0);
+  const avgWin = winners.length > 0 ? winners.reduce((s, t) => s + t.returnPct, 0) / winners.length : 0;
+  const avgLoss = losers.length > 0 ? Math.abs(losers.reduce((s, t) => s + t.returnPct, 0) / losers.length) : 0;
+  // Solve P·avgWin = (1−P)·avgLoss for P — the win rate at which wins
+  // exactly pay for losses. With no losers yet there's nothing to break
+  // even against, so the requirement is 0.
+  const breakevenWinRate = avgWin + avgLoss > 0 ? (avgLoss / (avgWin + avgLoss)) * 100 : 0;
 
   return {
     trades,
     equityCurve,
     strategyReturnPct: equity - 100,
     buyHoldReturnPct: ((candles[candles.length - 1].close - startPrice) / startPrice) * 100,
-    winRate: trades.length > 0 ? (wins / trades.length) * 100 : 0,
+    winRate: trades.length > 0 ? (winners.length / trades.length) * 100 : 0,
     maxDrawdownPct,
+    expectancyPct: trades.length > 0 ? trades.reduce((s, t) => s + t.returnPct, 0) / trades.length : 0,
+    breakevenWinRate,
+    totalCostPct: trades.length * ROUND_TRIP_COST_PCT,
   };
 }
 
@@ -385,6 +427,66 @@ export function runRsiOnlyBacktest(
       if (rsi <= RSI_OVERSOLD) return "buy";
       if (rsi >= RSI_OVERBOUGHT) return "sell";
       return "hold";
+    },
+    timeframe,
+  );
+}
+
+/** Small deterministic PRNG so a baseline run is reproducible — the same
+ * token and window always draw the same coin flips, otherwise the
+ * comparison would shift every time the page re-rendered. */
+function mulberry32(seed: number) {
+  let a = seed >>> 0;
+  return function next(): number {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function seedFromString(value: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * The control group: coin-flip entries, with the exact same stop-loss,
+ * take-profit, position sizing and costs as the real strategies. It knows
+ * nothing about price — so whatever return it produces is what this
+ * market, over this window, hands out for free to someone with good risk
+ * management and zero predictive skill.
+ *
+ * This is the honest yardstick, and a far harsher one than buy & hold: a
+ * signal that can't beat random entries has no demonstrated edge, and any
+ * profit it shows is the risk management working, not the indicators. Note
+ * that with a 1:2 risk-reward the coin flip is expected to land near
+ * break-even *before* costs (the odds of touching +2R before −1R in a
+ * driftless market are about 1/3, exactly the break-even win rate), so
+ * after fees the baseline should print a small loss. A strategy needs to
+ * clear that bar, not just clear zero.
+ *
+ * `tradeFrequency` should be the real strategy's own trades-per-candle
+ * rate, so the baseline pays a comparable amount of cost — a coin flip
+ * that trades 10x less often would win on fees alone and prove nothing.
+ */
+export function runRandomBaseline(
+  candles: Candle[],
+  tradeFrequency: number,
+  seed: string,
+  timeframe: BacktestTimeframe = "1d",
+): BacktestResult {
+  const rng = mulberry32(seedFromString(seed));
+  return simulate(
+    candles,
+    () => {
+      if (rng() > tradeFrequency) return "hold";
+      return rng() < 0.5 ? "buy" : "sell";
     },
     timeframe,
   );

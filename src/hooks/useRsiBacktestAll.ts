@@ -2,12 +2,15 @@ import { useState } from "react";
 import { mockCandles } from "../lib/mock";
 import { runRsiOnlyBacktest, type BacktestResult, type BacktestTimeframe } from "../lib/backtest";
 import { fetchBacktestCandles } from "../lib/backtestData";
+import { baselineFor } from "./useBacktestAll";
 import type { MarketToken } from "../types";
 
 export interface RsiBacktestSummary {
   tokenId: string;
   symbol: string;
   result: BacktestResult;
+  /** See BacktestSummary.baseline — same control group, same purpose. */
+  baseline: BacktestResult;
   isDemo: boolean;
 }
 
@@ -48,7 +51,8 @@ export function useRsiBacktestAll() {
         isDemo = true;
       }
       const result = runRsiOnlyBacktest(candles, rsiPeriod, timeframe);
-      summaries.push({ tokenId: token.id, symbol: token.symbol, result, isDemo });
+      const baseline = baselineFor(result, candles, `${token.id}:${timeframe}:rsi${rsiPeriod}`, timeframe);
+      summaries.push({ tokenId: token.id, symbol: token.symbol, result, baseline, isDemo });
       setState((s) => ({ ...s, progress: { done: summaries.length, total: tokens.length }, summaries: [...summaries] }));
     }
 

@@ -1,14 +1,37 @@
 import { useState } from "react";
 import { mockCandles } from "../lib/mock";
-import { runBacktest, type BacktestMode, type BacktestResult, type BacktestTimeframe } from "../lib/backtest";
+import {
+  runBacktest,
+  runRandomBaseline,
+  type BacktestMode,
+  type BacktestResult,
+  type BacktestTimeframe,
+} from "../lib/backtest";
 import { BTC_TOKEN_ID, fetchBacktestCandles } from "../lib/backtestData";
-import type { MarketToken } from "../types";
+import type { Candle, MarketToken } from "../types";
 
 export interface BacktestSummary {
   tokenId: string;
   symbol: string;
   result: BacktestResult;
+  /** Coin-flip entries over the same candles with identical risk
+   * management — the control group the strategy has to beat to have shown
+   * any edge at all. */
+  baseline: BacktestResult;
   isDemo: boolean;
+}
+
+/** Runs the control group at the strategy's own trade frequency, so the
+ * two pay comparable costs and the comparison is about signal quality
+ * rather than about who traded less. */
+export function baselineFor(
+  result: BacktestResult,
+  candles: Candle[],
+  seed: string,
+  timeframe: BacktestTimeframe,
+): BacktestResult {
+  const tradeFrequency = result.equityCurve.length > 0 ? result.trades.length / result.equityCurve.length : 0;
+  return runRandomBaseline(candles, tradeFrequency, seed, timeframe);
 }
 
 interface BatchState {
@@ -57,7 +80,8 @@ export function useBacktestAll() {
         isDemo = true;
       }
       const result = runBacktest(candles, token.id === BTC_TOKEN_ID ? null : btcCandles, mode, timeframe);
-      summaries.push({ tokenId: token.id, symbol: token.symbol, result, isDemo });
+      const baseline = baselineFor(result, candles, `${token.id}:${timeframe}:score`, timeframe);
+      summaries.push({ tokenId: token.id, symbol: token.symbol, result, baseline, isDemo });
       setState((s) => ({ ...s, progress: { done: summaries.length, total: tokens.length }, summaries: [...summaries] }));
     }
 
