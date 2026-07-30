@@ -8,8 +8,14 @@ import type { TokenSignals } from "../hooks/useWatchlistSignals";
 import type { Currency } from "../lib/currency";
 import { Badge, Card, formatMoney, formatPrice, ScoreBadge } from "./common";
 
-const TIMEFRAME_LABEL: Record<SignalTimeframe, string> = { "1h": "1H", "4h": "4H", "1d": "1D" };
-const TIMEFRAME_ORDER: SignalTimeframe[] = ["1h", "4h", "1d"];
+const TIMEFRAME_LABEL: Record<SignalTimeframe, string> = {
+  "1h": "1H",
+  "4h": "4H",
+  "1d": "1D",
+  "1w": "1S",
+  "1M": "1M",
+};
+const TIMEFRAME_ORDER: SignalTimeframe[] = ["1h", "4h", "1d", "1w", "1M"];
 
 type Tone = "up" | "down" | "neutral";
 
@@ -175,9 +181,9 @@ export function MarketOverview({
         {showExplainer && (
           <div className="mt-3 space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 text-xs leading-relaxed text-[var(--color-text-dim)]">
             <p>
-              O score combina os 3 timeframes (1H, 4H e 1D) de cada indicador, não só o que
-              está aberto no gráfico — por isso o número é o mesmo aqui e na tabela, independente
-              do timeframe selecionado abaixo. Começa neutro em{" "}
+              O score combina os 5 timeframes do gráfico (1H, 4H, 1D, 1S e 1M) de cada
+              indicador, não só o que está aberto no gráfico — por isso o número é o mesmo aqui e
+              na tabela, independente do timeframe selecionado abaixo. Começa neutro em{" "}
               <strong className="text-[var(--color-text)]">50</strong> e é ajustado por 3
               indicadores técnicos — nenhum deles sozinho consegue levar o resultado a um
               extremo, só a confluência entre eles:
@@ -190,7 +196,7 @@ export function MarketOverview({
                 — mede a velocidade e a força das variações recentes de preço, numa escala de 0
                 a 100. Abaixo de 30 é considerado sobrevendido (favorece compra); acima de 70,
                 sobrecomprado (favorece venda). Usamos a{" "}
-                <strong className="text-[var(--color-text)]">média entre os 3 timeframes</strong>
+                <strong className="text-[var(--color-text)]">média entre os 5 timeframes</strong>
                 ; quanto mais distante de 50, maior o ajuste no score.
               </li>
               <li>
@@ -198,7 +204,7 @@ export function MarketOverview({
                 uma média móvel exponencial rápida (12 períodos) com uma lenta (26 períodos) e
                 uma linha de sinal (9 períodos) sobre essa diferença. Linha MACD cruzando acima
                 do sinal indica momentum de alta; abaixo, momentum de baixa. Usamos o sinal que
-                aparece na <strong className="text-[var(--color-text)]">maioria dos 3
+                aparece na <strong className="text-[var(--color-text)]">maioria dos 5
                 timeframes</strong> (+15 pontos se em alta, −15 se em baixa).
               </li>
               <li>
@@ -208,13 +214,13 @@ export function MarketOverview({
                 — uma média móvel com bandas de volatilidade acima e abaixo do preço. Preço
                 abaixo da banda inferior soma +15 pontos (possível sobrevenda); acima da banda
                 superior, −15 (possível sobrecompra) — também pela posição que aparece na maioria
-                dos 3 timeframes.
+                dos 5 timeframes.
               </li>
               <li>
                 <strong className="text-[var(--color-text)]">Volume</strong> — quando o preço
                 toca uma das bandas de Bollinger (suporte ou resistência) com volume pelo menos
-                50% acima da média dos últimos 20 períodos em 2 dos 3 timeframes, isso é tratado
-                como confirmação do movimento: os +15/−15 da banda viram{" "}
+                50% acima da média dos últimos 20 períodos na maioria dos 5 timeframes, isso é
+                tratado como confirmação do movimento: os +15/−15 da banda viram{" "}
                 <strong className="text-[var(--color-text)]">+20/−20</strong>.
               </li>
             </ul>

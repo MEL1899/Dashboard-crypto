@@ -46,7 +46,13 @@ function RsiPill({ value }: { value: number }) {
 
 const NEUTRAL_TIMEFRAME_SIGNAL = { rsi: 50, macd: "neutral", bbPosition: "inside", volumeSpike: false } as const;
 const FALLBACK_SIGNALS: TokenSignals = {
-  byTimeframe: { "1h": NEUTRAL_TIMEFRAME_SIGNAL, "4h": NEUTRAL_TIMEFRAME_SIGNAL, "1d": NEUTRAL_TIMEFRAME_SIGNAL },
+  byTimeframe: {
+    "1h": NEUTRAL_TIMEFRAME_SIGNAL,
+    "4h": NEUTRAL_TIMEFRAME_SIGNAL,
+    "1d": NEUTRAL_TIMEFRAME_SIGNAL,
+    "1w": NEUTRAL_TIMEFRAME_SIGNAL,
+    "1M": NEUTRAL_TIMEFRAME_SIGNAL,
+  },
   score: { score: 50, level: "neutral", breakdown: [] },
   isDemo: true,
 };
@@ -121,6 +127,8 @@ export function MarketWatchlist({
               <th className="py-1.5 pr-2 text-center font-medium">RSI 1H</th>
               <th className="py-1.5 pr-2 text-center font-medium">RSI 4H</th>
               <th className="py-1.5 pr-2 text-center font-medium">RSI 1D</th>
+              <th className="py-1.5 pr-2 text-center font-medium">RSI 1S</th>
+              <th className="py-1.5 pr-2 text-center font-medium">RSI 1M</th>
               <th className="py-1.5 pr-2 font-medium">Score</th>
             </tr>
           </thead>
@@ -128,7 +136,13 @@ export function MarketWatchlist({
             {sorted.map((token) => {
               const isBigMove = Math.abs(token.change24h) >= BIG_MOVE_THRESHOLD;
               const signals = signalsByToken[token.id] ?? FALLBACK_SIGNALS;
-              const rsi = { "1h": signals.byTimeframe["1h"].rsi, "4h": signals.byTimeframe["4h"].rsi, "1d": signals.byTimeframe["1d"].rsi };
+              const rsi = {
+                "1h": signals.byTimeframe["1h"].rsi,
+                "4h": signals.byTimeframe["4h"].rsi,
+                "1d": signals.byTimeframe["1d"].rsi,
+                "1w": signals.byTimeframe["1w"].rsi,
+                "1M": signals.byTimeframe["1M"].rsi,
+              };
               return (
                 <tr
                   key={token.id}
@@ -175,6 +189,12 @@ export function MarketWatchlist({
                   <td className="py-1.5 pr-2 text-center">
                     <RsiPill value={rsi["1d"]} />
                   </td>
+                  <td className="py-1.5 pr-2 text-center">
+                    <RsiPill value={rsi["1w"]} />
+                  </td>
+                  <td className="py-1.5 pr-2 text-center">
+                    <RsiPill value={rsi["1M"]} />
+                  </td>
                   <td className="py-1.5 pr-2">
                     <ScoreBadge level={signals.score.level} score={signals.score.score} />
                   </td>
@@ -190,7 +210,13 @@ export function MarketWatchlist({
         {sorted.map((token) => {
           const isBigMove = Math.abs(token.change24h) >= BIG_MOVE_THRESHOLD;
           const signals = signalsByToken[token.id] ?? FALLBACK_SIGNALS;
-          const rsi = { "1h": signals.byTimeframe["1h"].rsi, "4h": signals.byTimeframe["4h"].rsi, "1d": signals.byTimeframe["1d"].rsi };
+          const rsi = {
+            "1h": signals.byTimeframe["1h"].rsi,
+            "4h": signals.byTimeframe["4h"].rsi,
+            "1d": signals.byTimeframe["1d"].rsi,
+            "1w": signals.byTimeframe["1w"].rsi,
+            "1M": signals.byTimeframe["1M"].rsi,
+          };
           return (
             <button
               key={token.id}
@@ -243,6 +269,12 @@ export function MarketWatchlist({
                 </span>
                 <span className="flex items-center gap-1 text-[10px] text-[var(--color-text-dim)]">
                   1D <RsiPill value={rsi["1d"]} />
+                </span>
+                <span className="flex items-center gap-1 text-[10px] text-[var(--color-text-dim)]">
+                  1S <RsiPill value={rsi["1w"]} />
+                </span>
+                <span className="flex items-center gap-1 text-[10px] text-[var(--color-text-dim)]">
+                  1M <RsiPill value={rsi["1M"]} />
                 </span>
               </div>
             </button>

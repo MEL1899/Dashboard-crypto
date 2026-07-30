@@ -171,6 +171,8 @@ export function mockSignalsByTimeframe(
     "1h": signalForTimeframe("1h"),
     "4h": signalForTimeframe("4h"),
     "1d": signalForTimeframe("1d"),
+    "1w": signalForTimeframe("1w"),
+    "1M": signalForTimeframe("1M"),
   };
 }
 

@@ -1,12 +1,13 @@
 import type { ScoreLevel } from "../components/common";
 
 /**
- * The 3 fixed timeframes the confluence score is always built from —
- * intentionally separate from the chart's `Timeframe` (types/index.ts),
- * which can offer more granularities (1w, 1M, ...) for display without the
- * score's math needing to change to match.
+ * The fixed timeframes the confluence score is always built from —
+ * intentionally a separate type from the chart's `Timeframe`
+ * (types/index.ts) even though the two currently list the same values, so
+ * a future chart-only granularity wouldn't have to be included in the
+ * score's math just because it's selectable on the chart.
  */
-export type SignalTimeframe = "1h" | "4h" | "1d";
+export type SignalTimeframe = "1h" | "4h" | "1d" | "1w" | "1M";
 
 export type MacdSignal = "bullish" | "bearish" | "neutral";
 export type BbPosition = "above-upper" | "below-lower" | "inside";
@@ -112,19 +113,20 @@ export interface TimeframeSignal {
 }
 
 /**
- * Combines RSI/MACD/Bollinger across all 3 timeframes (1h/4h/1d) into one
- * score, instead of reading a single timeframe's snapshot: RSI is averaged,
- * MACD and Bollinger position go by majority vote among the 3 (volume spike
- * the same way — confirmed if at least 2 of 3 timeframes show one). This is
- * what makes the score the same number everywhere for a token — the
- * watchlist row and the detail panel — regardless of which timeframe the
- * chart happens to have open, and a steadier read than any one timeframe
- * alone.
+ * Combines RSI/MACD/Bollinger across all 5 timeframes (1h/4h/1d/1w/1M) into
+ * one score, instead of reading a single timeframe's snapshot: RSI is
+ * averaged, MACD and Bollinger position go by majority vote among the 5
+ * (volume spike the same way — confirmed if a majority of timeframes show
+ * one). This is what makes the score the same number everywhere for a
+ * token — the watchlist row and the detail panel — regardless of which
+ * timeframe the chart happens to have open, and a steadier read than any
+ * one timeframe alone, now weighing short-term (1h/4h) against
+ * medium/long-term (1d/1w/1M) trend instead of just the first 3.
  */
 export function computeConfluenceScore(
   byTimeframe: Record<SignalTimeframe, TimeframeSignal>,
 ): OpportunityScoreResult {
-  const timeframes: SignalTimeframe[] = ["1h", "4h", "1d"];
+  const timeframes: SignalTimeframe[] = ["1h", "4h", "1d", "1w", "1M"];
   const avgRsi =
     timeframes.reduce((sum, tf) => sum + byTimeframe[tf].rsi, 0) / timeframes.length;
   const macd = majority(timeframes.map((tf) => byTimeframe[tf].macd));
@@ -135,6 +137,6 @@ export function computeConfluenceScore(
     rsi: avgRsi,
     macd,
     bbPosition,
-    volumeSpike: volumeSpikeCount >= 2,
+    volumeSpike: volumeSpikeCount > timeframes.length / 2,
   });
 }

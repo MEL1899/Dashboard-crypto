@@ -31,7 +31,7 @@ export interface TokenSignals {
   isDemo: boolean;
 }
 
-const TIMEFRAMES: SignalTimeframe[] = ["1h", "4h", "1d"];
+const TIMEFRAMES: SignalTimeframe[] = ["1h", "4h", "1d", "1w", "1M"];
 const RETRY_INTERVAL_MS = 60_000;
 
 async function fetchOneTimeframeSignal(
