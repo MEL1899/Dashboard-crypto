@@ -79,10 +79,16 @@ export function useWatchlistTokens(ids: string[], apiKey?: string) {
           loading: false,
           isDemo: true,
           error: err instanceof Error ? err.message : "Failed to load watchlist",
-          // A transient refresh failure shouldn't swap an already-correct
-          // real price for a completely different, made-up mock one — only
-          // fall back to mock if we never had real data to begin with.
-          tokens: !s.isDemo && s.tokens.length > 0 ? s.tokens : mockMarketTokens(currentIds),
+          // A transient *background* refresh failure shouldn't swap
+          // already-correct real prices for made-up mock ones — but only
+          // when it's the same watchlist that's already loaded (!isInitial).
+          // On a fresh watchlist change, `s.tokens` is still the PREVIOUS
+          // list's data (wrong ids), so it must fall back to mock for the
+          // current ids instead of reusing it.
+          tokens:
+            !isInitial && !s.isDemo && s.tokens.length > 0
+              ? s.tokens
+              : mockMarketTokens(currentIds),
         }));
       }
     }

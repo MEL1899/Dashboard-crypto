@@ -30,8 +30,13 @@ export const BINANCE_SPOT_SYMBOL: Record<string, string> = {
   cosmos: "ATOMUSDT",
   stellar: "XLMUSDT",
   filecoin: "FILUSDT",
-  hyperliquid: "HYPEUSDT",
   sui: "SUIUSDT",
+  // hyperliquid intentionally NOT mapped: unverified whether "HYPEUSDT" is
+  // actually a real Binance pair, and an invalid symbol here means every
+  // candle/RSI fetch for it silently fails and falls back to mock — worse
+  // than just routing it through the CoinGecko path, which is confirmed
+  // working (its price already tracks real quotes closely). Re-add only
+  // once confirmed against Binance's actual symbol list.
 };
 
 export function symbolForToken(tokenId: string): string | null {

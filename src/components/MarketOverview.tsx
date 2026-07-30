@@ -110,7 +110,7 @@ export function MarketOverview({
   return (
     <div className="flex flex-col gap-3">
       <Card
-        title="Score de Oportunidade"
+        title={token ? `Score de Oportunidade — ${token.symbol}` : "Score de Oportunidade"}
         action={
           <button
             onClick={() => setShowExplainer((v) => !v)}

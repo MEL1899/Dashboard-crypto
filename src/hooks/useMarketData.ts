@@ -62,11 +62,15 @@ export function useMarketData(tokenId: string | null, timeframe: Timeframe, apiK
       } catch (err) {
         if (cancelled) return;
         setState((s) => {
-          // Same rule as the watchlist ticker: a transient refresh failure
-          // keeps showing the last real candles instead of swapping to a
-          // completely different mock series. Mock is only for when we
-          // never had real data for this token/timeframe at all.
-          if (!s.isDemo && s.candles.length > 0) {
+          // Same rule as the watchlist ticker: a transient *background*
+          // refresh failure keeps showing the last real candles instead of
+          // swapping to a completely different mock series. But this only
+          // holds for a refresh of the SAME token/timeframe already on
+          // screen (!isInitial) — on a fresh switch to a different
+          // token/timeframe, `s.candles` is still the PREVIOUS token's data,
+          // and showing that here would silently display the wrong asset's
+          // chart under the new one's label instead of falling back to mock.
+          if (!isInitial && !s.isDemo && s.candles.length > 0) {
             return { ...s, loading: false };
           }
           const candles = mockCandles(tokenId, timeframe);
