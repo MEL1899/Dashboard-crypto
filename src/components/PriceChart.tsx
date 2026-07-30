@@ -15,7 +15,13 @@ interface PriceChartProps {
   rsi: IndicatorPoint[];
   volume: IndicatorPoint[];
   theme: "light" | "dark";
+  /** BTC's own candles for the "Comparar com BTC" overlay — plotted on its
+   * own left-axis scale (its price range rarely matches the open token's),
+   * omitted/empty when the comparison toggle is off. */
+  compareCandles?: Candle[];
 }
+
+const COMPARE_LINE_COLOR = "#f59e0b";
 
 // lightweight-charts renders to <canvas>, which can't resolve CSS custom
 // properties — so each theme needs its own literal color set here, kept in
@@ -25,7 +31,14 @@ const THEME_COLORS = {
   light: { bg: "#ffffff", grid: "#e4e7ee", text: "#5b6472", rsiLine: "#0a8fa6" },
 };
 
-export function PriceChart({ candles, bollinger, rsi, volume, theme }: PriceChartProps) {
+export function PriceChart({
+  candles,
+  bollinger,
+  rsi,
+  volume,
+  theme,
+  compareCandles,
+}: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
 
@@ -46,6 +59,12 @@ export function PriceChart({ candles, bollinger, rsi, volume, theme }: PriceChar
         horzLines: { color: colors.grid },
       },
       rightPriceScale: { borderColor: colors.grid },
+      // Only shown when the BTC comparison overlay is active — its own
+      // scale, since BTC's price rarely fits the same range as an altcoin.
+      leftPriceScale: {
+        borderColor: colors.grid,
+        visible: Boolean(compareCandles && compareCandles.length > 0),
+      },
       timeScale: { borderColor: colors.grid, timeVisible: true },
       autoSize: true,
     });
@@ -112,6 +131,24 @@ export function PriceChart({ candles, bollinger, rsi, volume, theme }: PriceChar
       );
     }
 
+    if (compareCandles && compareCandles.length > 0) {
+      const compareSeries = chart.addSeries(
+        LineSeries,
+        {
+          color: COMPARE_LINE_COLOR,
+          lineWidth: 2,
+          priceScaleId: "left",
+          lastValueVisible: true,
+          priceLineVisible: false,
+          title: "BTC",
+        },
+        0,
+      );
+      compareSeries.setData(
+        compareCandles.map((c) => ({ time: c.time as UTCTimestamp, value: c.close })),
+      );
+    }
+
     // Pane 1: volume, colored per-bar by that candle's direction (same
     // green/red as the candlesticks) instead of one flat accent color —
     // makes it readable at a glance which side pushed the volume.
@@ -151,7 +188,7 @@ export function PriceChart({ candles, bollinger, rsi, volume, theme }: PriceChar
       chart.remove();
       chartRef.current = null;
     };
-  }, [candles, bollinger, rsi, volume, theme]);
+  }, [candles, bollinger, rsi, volume, theme, compareCandles]);
 
   return <div ref={containerRef} className="h-[560px] w-full" />;
 }

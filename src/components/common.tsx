@@ -105,6 +105,50 @@ export function ScoreBadge({ level, score }: { level: ScoreLevel; score?: number
   );
 }
 
+/**
+ * Tiny inline trend line for the score's recent history (see
+ * lib/scoreHistory.ts) — plain SVG, no charting library, since it's just a
+ * handful of points next to a badge. Renders nothing below 2 points (no
+ * trend to draw yet), keeping layout stable while history accumulates.
+ */
+export function ScoreSparkline({
+  points,
+  width = 44,
+  height = 16,
+}: {
+  points: { time: number; score: number }[];
+  width?: number;
+  height?: number;
+}) {
+  if (points.length < 2) return null;
+
+  const scores = points.map((p) => p.score);
+  const min = Math.min(...scores);
+  const max = Math.max(...scores);
+  const range = max - min || 1;
+  const coords = scores.map((s, i) => {
+    const x = (i / (scores.length - 1)) * width;
+    const y = height - ((s - min) / range) * height;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+
+  const trend = scores[scores.length - 1] - scores[0];
+  const color = trend > 0 ? "#0ca30c" : trend < 0 ? "#d03b3b" : "#8b93a7";
+
+  return (
+    <svg width={width} height={height} className="shrink-0" aria-hidden="true">
+      <polyline
+        points={coords.join(" ")}
+        fill="none"
+        stroke={color}
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function Spinner({ className }: { className?: string }) {
   return (
     <div

@@ -7,7 +7,8 @@ import type { RelativeStrengthSignal, TrendSignal } from "../lib/indicators";
 import type { BbPosition, MacdSignal, SignalTimeframe } from "../lib/opportunityScore";
 import type { TokenSignals } from "../hooks/useWatchlistSignals";
 import type { Currency } from "../lib/currency";
-import { Badge, Card, formatMoney, formatPrice, ScoreBadge } from "./common";
+import { Badge, Card, formatMoney, formatPrice, ScoreBadge, ScoreSparkline } from "./common";
+import type { ScorePoint } from "../lib/scoreHistory";
 
 const TIMEFRAME_LABEL: Record<SignalTimeframe, string> = {
   "1h": "1H",
@@ -114,6 +115,9 @@ interface MarketOverviewProps {
    * (see useWatchlistSignals) — the same number shown in the watchlist
    * table, independent of the chart's active timeframe below. */
   signals?: TokenSignals;
+  /** Recent score points for this token (see useScoreHistory), drawn next
+   * to the score number. */
+  scoreHistory?: ScorePoint[];
 }
 
 export function MarketOverview({
@@ -122,6 +126,7 @@ export function MarketOverview({
   bollinger,
   currency,
   signals,
+  scoreHistory,
 }: MarketOverviewProps) {
   const [showExplainer, setShowExplainer] = useState(false);
   const lastCandle = candles[candles.length - 1];
@@ -156,6 +161,7 @@ export function MarketOverview({
             {token && signals ? signals.score.score : "-"}
           </div>
           {token && signals && <ScoreBadge level={signals.score.level} />}
+          {token && signals && <ScoreSparkline points={scoreHistory ?? []} width={64} height={20} />}
         </div>
         {token && signals && (
           <p className="mt-1 text-xs text-[var(--color-text-dim)]">

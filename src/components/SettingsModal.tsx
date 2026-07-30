@@ -10,6 +10,19 @@ interface SettingsModalProps {
 
 export function SettingsModal({ settings, onClose, onSave }: SettingsModalProps) {
   const [form, setForm] = useState(settings);
+  const notificationsSupported = typeof window !== "undefined" && "Notification" in window;
+  const [permission, setPermission] = useState<NotificationPermission | "unsupported">(
+    notificationsSupported ? Notification.permission : "unsupported",
+  );
+
+  async function handleToggleAlerts(checked: boolean) {
+    if (checked && notificationsSupported && Notification.permission === "default") {
+      const result = await Notification.requestPermission();
+      setPermission(result);
+      if (result !== "granted") return; // don't enable without permission
+    }
+    setForm({ ...form, alertsEnabled: checked });
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
@@ -45,6 +58,28 @@ export function SettingsModal({ settings, onClose, onSave }: SettingsModalProps)
             />
             <span className="text-xs text-[var(--color-text-dim)]">
               Preços/indicadores já funcionam sem key (limite de requisições menor).
+            </span>
+          </label>
+
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              checked={form.alertsEnabled}
+              disabled={!notificationsSupported}
+              onChange={(e) => handleToggleAlerts(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span className="flex flex-col gap-0.5">
+              <span className="text-[var(--color-text)]">
+                Alertas de score (Compra Forte / Venda Forte)
+              </span>
+              <span className="text-xs text-[var(--color-text-dim)]">
+                {!notificationsSupported
+                  ? "Notificações não são suportadas neste navegador."
+                  : permission === "denied"
+                    ? "Notificações bloqueadas nas permissões do navegador — libere o site para ativar."
+                    : "Notificação do navegador quando um ativo da watchlist entra numa dessas faixas. Pede permissão do navegador na primeira vez."}
+              </span>
             </span>
           </label>
 

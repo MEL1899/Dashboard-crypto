@@ -1,12 +1,15 @@
 import { lazy, Suspense, useState, type ReactNode } from "react";
 import clsx from "clsx";
-import { LayoutDashboard, Moon, Settings, Sun, Wallet, X } from "lucide-react";
+import { BarChart2, LayoutDashboard, Moon, Settings, Sun, Wallet, X } from "lucide-react";
 import { useMarketData } from "./hooks/useMarketData";
 import { useWatchlistTokens } from "./hooks/useWatchlistTokens";
 import { useWatchlistSignals } from "./hooks/useWatchlistSignals";
 import { useMarketPanorama } from "./hooks/useMarketPanorama";
 import { useWallet } from "./hooks/useWallet";
 import { useTheme } from "./hooks/useTheme";
+import { useScoreHistory } from "./hooks/useScoreHistory";
+import { useScoreAlerts } from "./hooks/useScoreAlerts";
+import { useCompareCandles } from "./hooks/useCompareCandles";
 import { loadSettings, saveSettings } from "./lib/settings";
 import { MarketHighlights } from "./components/MarketHighlights";
 import { MarketOverview } from "./components/MarketOverview";
@@ -60,6 +63,7 @@ function App() {
   const [portfolio, setPortfolio] = useState<string[]>(settings.portfolio);
   const [tokenId, setTokenId] = useState<string | null>(settings.selectedTokenId || null);
   const [timeframe, setTimeframe] = useState<Timeframe>(settings.timeframe);
+  const [compareBtc, setCompareBtc] = useState(false);
   const [walletQuery, setWalletQuery] = useState<{ address: string; chain: ChainKey }>({
     address: settings.walletAddress,
     chain: settings.chain,
@@ -67,8 +71,11 @@ function App() {
 
   const watchlistTokens = useWatchlistTokens(watchlist, settings.coingeckoApiKey || undefined);
   const signalsByToken = useWatchlistSignals(watchlist, settings.coingeckoApiKey || undefined);
+  const scoreHistory = useScoreHistory(signalsByToken);
+  useScoreAlerts(signalsByToken, watchlistTokens.tokens, settings.alertsEnabled);
   const panorama = useMarketPanorama(settings.coingeckoApiKey || undefined);
   const market = useMarketData(tokenId, timeframe, settings.coingeckoApiKey || undefined);
+  const compare = useCompareCandles(compareBtc, tokenId, timeframe, settings.coingeckoApiKey || undefined);
   const wallet = useWallet(walletQuery.address, walletQuery.chain, settings.etherscanApiKey);
 
   const selectedToken = watchlistTokens.tokens.find((t) => t.id === tokenId);
@@ -225,6 +232,7 @@ function App() {
                   onSelect={handleTokenSelect}
                   currency={MERCADO_CURRENCY}
                   signalsByToken={signalsByToken}
+                  scoreHistoryByToken={scoreHistory}
                   portfolioIds={portfolio}
                   onTogglePortfolio={handleTogglePortfolio}
                 />
@@ -244,26 +252,44 @@ function App() {
                         bollinger={market.bollinger}
                         currency={MERCADO_CURRENCY}
                         signals={tokenId ? signalsByToken[tokenId] : undefined}
+                        scoreHistory={tokenId ? scoreHistory[tokenId] : undefined}
                       />
                     )}
 
                     <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
                       <div className="flex flex-wrap items-center justify-between gap-3 px-1 pb-2">
-                        <div className="flex items-center gap-1 rounded-lg border border-[var(--color-border)] p-1">
-                          {TIMEFRAME_OPTIONS.map((t) => (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="flex items-center gap-1 rounded-lg border border-[var(--color-border)] p-1">
+                            {TIMEFRAME_OPTIONS.map((t) => (
+                              <button
+                                key={t.value}
+                                onClick={() => handleTimeframeSelect(t.value)}
+                                className={clsx(
+                                  "rounded-md px-2.5 py-1 text-xs",
+                                  timeframe === t.value
+                                    ? "bg-[var(--color-accent)] text-white"
+                                    : "text-[var(--color-text-dim)] hover:text-[var(--color-text)]",
+                                )}
+                              >
+                                {t.label}
+                              </button>
+                            ))}
+                          </div>
+                          {tokenId !== "bitcoin" && (
                             <button
-                              key={t.value}
-                              onClick={() => handleTimeframeSelect(t.value)}
+                              onClick={() => setCompareBtc((v) => !v)}
+                              aria-pressed={compareBtc}
                               className={clsx(
-                                "rounded-md px-2.5 py-1 text-xs",
-                                timeframe === t.value
-                                  ? "bg-[var(--color-accent)] text-white"
-                                  : "text-[var(--color-text-dim)] hover:text-[var(--color-text)]",
+                                "flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs",
+                                compareBtc
+                                  ? "border-[#f59e0b] bg-[#f59e0b]/15 text-[#f59e0b]"
+                                  : "border-[var(--color-border)] text-[var(--color-text-dim)] hover:text-[var(--color-text)]",
                               )}
                             >
-                              {t.label}
+                              <BarChart2 size={13} />
+                              Comparar com BTC
                             </button>
-                          ))}
+                          )}
                         </div>
                         <button
                           onClick={handleCloseChart}
@@ -286,6 +312,7 @@ function App() {
                             rsi={market.rsi}
                             volume={market.volume}
                             theme={theme}
+                            compareCandles={compareBtc ? compare.candles : undefined}
                           />
                         </Suspense>
                       )}

@@ -92,4 +92,8 @@ export interface AppSettings {
   portfolio: string[];
   selectedTokenId: string;
   timeframe: Timeframe;
+  /** Browser notifications when a token's score crosses into Compra Forte
+   * / Venda Forte — requires Notification permission, requested when this
+   * is turned on in Configurações. */
+  alertsEnabled: boolean;
 }

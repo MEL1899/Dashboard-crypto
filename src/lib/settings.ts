@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   portfolio: [],
   selectedTokenId: "",
   timeframe: "1d",
+  alertsEnabled: false,
 };
 
 export function loadSettings(): AppSettings {

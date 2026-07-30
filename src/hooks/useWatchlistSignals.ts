@@ -38,6 +38,11 @@ export interface TokenSignals {
 
 const TIMEFRAMES: SignalTimeframe[] = ["1h", "4h", "1d", "1w", "1M"];
 const RETRY_INTERVAL_MS = 60_000;
+// Score/RSI don't need 30s-fresh price-grade updates, but they still need
+// to move sometime — without this, a token that succeeds once would never
+// be refetched again (loadMissing only retries failed/mock ones), which
+// would leave the score history sparkline permanently flat.
+const FULL_REFRESH_INTERVAL_MS = 5 * 60_000;
 
 /** Fetches BTC's own candles for a timeframe, used as the relative-strength
  * baseline for every other token — fetched once per refresh and shared
@@ -178,33 +183,41 @@ export function useWatchlistSignals(ids: string[], apiKey?: string) {
 
     let cancelled = false;
 
-    async function loadMissing() {
-      // Only (re)fetch tokens without a *successful* real fetch yet — never
-      // re-request one that already has real data, but do keep retrying
-      // ones still stuck on the mock fallback from a transient failure, so
-      // a token doesn't stay wrong for the rest of the session just
-      // because its first attempt happened to fail.
-      const idsToFetch = currentIds.filter((id) => {
-        const existing = dataRef.current[id];
-        return !existing || existing.isDemo;
-      });
-      if (idsToFetch.length === 0) return;
-
+    async function refresh(ids: string[]) {
+      if (ids.length === 0) return;
       // Fetched once per refresh and reused for every token below, instead
       // of once per token, since it's the same BTC baseline for all of them.
       const btcCandlesByTf = await fetchBtcCandlesByTimeframe(apiKey);
       const entries = await Promise.all(
-        idsToFetch.map(async (id) => [id, await fetchTokenSignals(id, btcCandlesByTf, apiKey)] as const),
+        ids.map(async (id) => [id, await fetchTokenSignals(id, btcCandlesByTf, apiKey)] as const),
       );
       if (cancelled) return;
       setData((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
     }
 
+    // Only (re)fetch tokens without a *successful* real fetch yet — never
+    // re-request one that already has real data, but do keep retrying ones
+    // still stuck on the mock fallback from a transient failure, so a token
+    // doesn't stay wrong for the rest of the session just because its first
+    // attempt happened to fail.
+    function loadMissing() {
+      const idsToFetch = currentIds.filter((id) => {
+        const existing = dataRef.current[id];
+        return !existing || existing.isDemo;
+      });
+      return refresh(idsToFetch);
+    }
+
     loadMissing();
     const retryTimer = setInterval(loadMissing, RETRY_INTERVAL_MS);
+    // Separately, refresh everything (including already-successful tokens)
+    // on a slower cadence, so the score can actually move over time instead
+    // of freezing at whatever it read on the first successful fetch.
+    const fullRefreshTimer = setInterval(() => refresh(currentIds), FULL_REFRESH_INTERVAL_MS);
     return () => {
       cancelled = true;
       clearInterval(retryTimer);
+      clearInterval(fullRefreshTimer);
     };
   }, [key, apiKey]);
 

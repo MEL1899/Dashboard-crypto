@@ -4,7 +4,8 @@ import { ArrowDown, ArrowUp, Star } from "lucide-react";
 import type { MarketToken } from "../types";
 import type { Currency } from "../lib/currency";
 import type { TokenSignals } from "../hooks/useWatchlistSignals";
-import { Badge, Card, ScoreBadge, formatMoney, formatPrice } from "./common";
+import type { ScoreHistory } from "../lib/scoreHistory";
+import { Badge, Card, ScoreBadge, ScoreSparkline, formatMoney, formatPrice } from "./common";
 
 type SortKey = "price" | "change24h" | "marketCap" | "volume24h";
 
@@ -91,6 +92,7 @@ interface WatchlistTableProps {
   onSelect: (id: string) => void;
   currency: Currency;
   signalsByToken: Record<string, TokenSignals>;
+  scoreHistoryByToken: ScoreHistory;
   portfolioIds: Set<string>;
   onTogglePortfolio: (id: string) => void;
   sortKey: SortKey;
@@ -108,6 +110,7 @@ function WatchlistTable({
   onSelect,
   currency,
   signalsByToken,
+  scoreHistoryByToken,
   portfolioIds,
   onTogglePortfolio,
   sortKey,
@@ -212,7 +215,10 @@ function WatchlistTable({
                     <RsiPill value={rsi["1M"]} />
                   </td>
                   <td className="py-1.5 pr-2">
-                    <ScoreBadge level={signals.score.level} score={signals.score.score} />
+                    <span className="flex items-center gap-2">
+                      <ScoreBadge level={signals.score.level} score={signals.score.score} />
+                      <ScoreSparkline points={scoreHistoryByToken[token.id] ?? []} />
+                    </span>
                   </td>
                 </tr>
               );
@@ -261,7 +267,10 @@ function WatchlistTable({
                   <span className="font-medium text-[var(--color-text)]">{token.symbol}</span>
                   <span className="ml-1.5 text-xs text-[var(--color-text-dim)]">{token.name}</span>
                 </div>
-                <ScoreBadge level={signals.score.level} score={signals.score.score} />
+                <span className="flex items-center gap-2">
+                  <ScoreBadge level={signals.score.level} score={signals.score.score} />
+                  <ScoreSparkline points={scoreHistoryByToken[token.id] ?? []} />
+                </span>
               </div>
 
               <div className="flex items-center justify-between gap-2">
@@ -322,6 +331,9 @@ interface MarketWatchlistProps {
    * (see useWatchlistSignals) — the same score shows here and in the
    * detail panel below, regardless of the chart's active timeframe. */
   signalsByToken: Record<string, TokenSignals>;
+  /** Recent score points per token (see useScoreHistory) — drawn as a small
+   * sparkline next to the Score badge. */
+  scoreHistoryByToken: ScoreHistory;
   /** Subset of `tokens` the user has marked as actually held, not just
    * watched — splits the table into a "Meu Portfólio" group and the rest. */
   portfolioIds: string[];
@@ -334,6 +346,7 @@ export function MarketWatchlist({
   onSelect,
   currency,
   signalsByToken,
+  scoreHistoryByToken,
   portfolioIds,
   onTogglePortfolio,
 }: MarketWatchlistProps) {
@@ -365,6 +378,7 @@ export function MarketWatchlist({
     onSelect,
     currency,
     signalsByToken,
+    scoreHistoryByToken,
     portfolioIds: portfolioSet,
     onTogglePortfolio,
     sortKey,
