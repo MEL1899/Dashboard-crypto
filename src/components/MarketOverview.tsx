@@ -1,13 +1,80 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import clsx from "clsx";
 import { Info } from "lucide-react";
 import type { BollingerBands, Candle, MarketToken, Timeframe } from "../types";
 import { bbSignal } from "../lib/indicators";
+import type { BbPosition, MacdSignal } from "../lib/opportunityScore";
 import type { TokenSignals } from "../hooks/useWatchlistSignals";
 import type { Currency } from "../lib/currency";
 import { Badge, Card, formatMoney, formatPrice, ScoreBadge } from "./common";
 
 const TIMEFRAME_LABEL: Record<Timeframe, string> = { "1h": "1H", "4h": "4H", "1d": "1D" };
 const TIMEFRAME_ORDER: Timeframe[] = ["1h", "4h", "1d"];
+
+type Tone = "up" | "down" | "neutral";
+
+const MACD_LABEL: Record<MacdSignal, string> = { bullish: "Alta", bearish: "Baixa", neutral: "Neutro" };
+const BB_LABEL: Record<BbPosition, string> = {
+  "above-upper": "Acima",
+  "below-lower": "Abaixo",
+  inside: "Dentro",
+};
+
+function toneForRsi(value: number): Tone {
+  if (value <= 30) return "up";
+  if (value >= 70) return "down";
+  return "neutral";
+}
+function toneForMacd(signal: MacdSignal): Tone {
+  return signal === "bullish" ? "up" : signal === "bearish" ? "down" : "neutral";
+}
+function toneForBb(position: BbPosition): Tone {
+  return position === "below-lower" ? "up" : position === "above-upper" ? "down" : "neutral";
+}
+
+function ToneText({ tone, children }: { tone: Tone; children: ReactNode }) {
+  return (
+    <span
+      className={clsx(
+        "num-mono font-medium",
+        tone === "up" && "text-[var(--color-up)]",
+        tone === "down" && "text-[var(--color-down)]",
+        tone === "neutral" && "text-[var(--color-text-dim)]",
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+interface IndicatorRow {
+  label: string;
+  hint: string;
+  render: (signal: TokenSignals["byTimeframe"][Timeframe]) => ReactNode;
+}
+
+const INDICATOR_ROWS: IndicatorRow[] = [
+  {
+    label: "RSI",
+    hint: "força e velocidade do movimento",
+    render: (s) => <ToneText tone={toneForRsi(s.rsi)}>{s.rsi}</ToneText>,
+  },
+  {
+    label: "MACD",
+    hint: "direção do momentum",
+    render: (s) => <ToneText tone={toneForMacd(s.macd)}>{MACD_LABEL[s.macd]}</ToneText>,
+  },
+  {
+    label: "Bollinger",
+    hint: "posição vs. suporte/resistência",
+    render: (s) => <ToneText tone={toneForBb(s.bbPosition)}>{BB_LABEL[s.bbPosition]}</ToneText>,
+  },
+  {
+    label: "Volume",
+    hint: "confirma (ou não) o movimento",
+    render: (s) => <ToneText tone={s.volumeSpike ? "up" : "neutral"}>{s.volumeSpike ? "Alto" : "Normal"}</ToneText>,
+  },
+];
 
 interface MarketOverviewProps {
   token: MarketToken | undefined;
@@ -66,15 +133,43 @@ export function MarketOverview({
             {signals.score.breakdown.join(" · ")}
           </p>
         )}
+
         {token && signals && (
-          <p className="num-mono mt-2 flex items-center gap-3 text-[10px] text-[var(--color-text-dim)]">
-            {TIMEFRAME_ORDER.map((t) => (
-              <span key={t}>
-                RSI {TIMEFRAME_LABEL[t]}
-                {signals.isDemo ? " (estimado)" : ""}: {signals.rsiByTimeframe[t]}
-              </span>
-            ))}
-          </p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-[var(--color-text-dim)]">
+                  <th className="py-1 pr-2 text-left font-medium">Indicador</th>
+                  {TIMEFRAME_ORDER.map((t) => (
+                    <th key={t} className="px-2 py-1 text-center font-medium">
+                      {TIMEFRAME_LABEL[t]}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {INDICATOR_ROWS.map((row) => (
+                  <tr key={row.label} className="border-t border-[var(--color-border)]">
+                    <td className="py-1.5 pr-2 text-[var(--color-text-dim)]">
+                      {row.label}
+                      <span className="ml-1 text-[10px] opacity-70">({row.hint})</span>
+                    </td>
+                    {TIMEFRAME_ORDER.map((t) => (
+                      <td key={t} className="px-2 py-1.5 text-center">
+                        {row.render(signals.byTimeframe[t])}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {signals.isDemo && (
+              <p className="mt-1 text-[10px] text-[var(--color-text-dim)]">
+                Alguns valores acima são estimados — não foi possível buscar o dado real para
+                todos os timeframes.
+              </p>
+            )}
+          </div>
         )}
 
         {showExplainer && (

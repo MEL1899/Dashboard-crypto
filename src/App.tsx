@@ -210,64 +210,65 @@ function App() {
 
                 {tokenId && (
                   <div className="flex flex-col gap-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex items-center gap-1 rounded-lg border border-[var(--color-border)] p-1">
-                        {TIMEFRAME_OPTIONS.map((t) => (
-                          <button
-                            key={t.value}
-                            onClick={() => handleTimeframeSelect(t.value)}
-                            className={clsx(
-                              "rounded-md px-2.5 py-1 text-xs",
-                              timeframe === t.value
-                                ? "bg-[var(--color-accent)] text-white"
-                                : "text-[var(--color-text-dim)] hover:text-[var(--color-text)]",
-                            )}
-                          >
-                            {t.label}
-                          </button>
-                        ))}
+                    {!market.loading && market.isDemo && (
+                      <div className="rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-3 py-2 text-xs text-[var(--color-text)]">
+                        Modo demonstração para o gráfico: {market.error}. Exibindo candles
+                        simulados.
                       </div>
-                      <button
-                        onClick={handleCloseChart}
-                        className="flex items-center gap-1 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-xs text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
-                      >
-                        <X size={13} />
-                        Fechar gráfico
-                      </button>
-                    </div>
-
-                    {market.loading ? (
-                      <div className="flex h-96 items-center justify-center">
-                        <Spinner />
-                      </div>
-                    ) : (
-                      <>
-                        {market.isDemo && (
-                          <div className="rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-3 py-2 text-xs text-[var(--color-text)]">
-                            Modo demonstração para o gráfico: {market.error}. Exibindo candles
-                            simulados.
-                          </div>
-                        )}
-                        <MarketOverview
-                          token={selectedToken}
-                          candles={market.candles}
-                          bollinger={market.bollinger}
-                          currency={MERCADO_CURRENCY}
-                          signals={tokenId ? signalsByToken[tokenId] : undefined}
-                        />
-                        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
-                          <Suspense fallback={<TabFallback />}>
-                            <PriceChart
-                              candles={market.candles}
-                              bollinger={market.bollinger}
-                              rsi={market.rsi}
-                              volume={market.volume}
-                              theme={theme}
-                            />
-                          </Suspense>
-                        </div>
-                      </>
                     )}
+                    {!market.loading && (
+                      <MarketOverview
+                        token={selectedToken}
+                        candles={market.candles}
+                        bollinger={market.bollinger}
+                        currency={MERCADO_CURRENCY}
+                        signals={tokenId ? signalsByToken[tokenId] : undefined}
+                      />
+                    )}
+
+                    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+                      <div className="flex flex-wrap items-center justify-between gap-3 px-1 pb-2">
+                        <div className="flex items-center gap-1 rounded-lg border border-[var(--color-border)] p-1">
+                          {TIMEFRAME_OPTIONS.map((t) => (
+                            <button
+                              key={t.value}
+                              onClick={() => handleTimeframeSelect(t.value)}
+                              className={clsx(
+                                "rounded-md px-2.5 py-1 text-xs",
+                                timeframe === t.value
+                                  ? "bg-[var(--color-accent)] text-white"
+                                  : "text-[var(--color-text-dim)] hover:text-[var(--color-text)]",
+                              )}
+                            >
+                              {t.label}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          onClick={handleCloseChart}
+                          className="flex items-center gap-1 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-xs text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
+                        >
+                          <X size={13} />
+                          Fechar gráfico
+                        </button>
+                      </div>
+
+                      {market.loading ? (
+                        <div className="flex h-96 items-center justify-center">
+                          <Spinner />
+                        </div>
+                      ) : (
+                        <Suspense fallback={<TabFallback />}>
+                          <PriceChart
+                            candles={market.candles}
+                            bollinger={market.bollinger}
+                            rsi={market.rsi}
+                            volume={market.volume}
+                            theme={theme}
+                          />
+                        </Suspense>
+                      )}
+                    </div>
                   </div>
                 )}
               </>

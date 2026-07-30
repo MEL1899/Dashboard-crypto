@@ -44,8 +44,9 @@ function RsiPill({ value }: { value: number }) {
   );
 }
 
+const NEUTRAL_TIMEFRAME_SIGNAL = { rsi: 50, macd: "neutral", bbPosition: "inside", volumeSpike: false } as const;
 const FALLBACK_SIGNALS: TokenSignals = {
-  rsiByTimeframe: { "1h": 50, "4h": 50, "1d": 50 },
+  byTimeframe: { "1h": NEUTRAL_TIMEFRAME_SIGNAL, "4h": NEUTRAL_TIMEFRAME_SIGNAL, "1d": NEUTRAL_TIMEFRAME_SIGNAL },
   score: { score: 50, level: "neutral", breakdown: [] },
   isDemo: true,
 };
@@ -127,7 +128,7 @@ export function MarketWatchlist({
             {sorted.map((token) => {
               const isBigMove = Math.abs(token.change24h) >= BIG_MOVE_THRESHOLD;
               const signals = signalsByToken[token.id] ?? FALLBACK_SIGNALS;
-              const rsi = signals.rsiByTimeframe;
+              const rsi = { "1h": signals.byTimeframe["1h"].rsi, "4h": signals.byTimeframe["4h"].rsi, "1d": signals.byTimeframe["1d"].rsi };
               return (
                 <tr
                   key={token.id}
@@ -189,7 +190,7 @@ export function MarketWatchlist({
         {sorted.map((token) => {
           const isBigMove = Math.abs(token.change24h) >= BIG_MOVE_THRESHOLD;
           const signals = signalsByToken[token.id] ?? FALLBACK_SIGNALS;
-          const rsi = signals.rsiByTimeframe;
+          const rsi = { "1h": signals.byTimeframe["1h"].rsi, "4h": signals.byTimeframe["4h"].rsi, "1d": signals.byTimeframe["1d"].rsi };
           return (
             <button
               key={token.id}

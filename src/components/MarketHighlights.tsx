@@ -16,7 +16,7 @@ const DIRECTION_META = {
 };
 
 /** Flags a coin only when RSI crosses the same threshold on all 3 timeframes at once. */
-function classifyDirection(rsi: TokenSignals["rsiByTimeframe"]): "oversold" | "overbought" | null {
+function classifyDirection(rsi: { "1h": number; "4h": number; "1d": number }): "oversold" | "overbought" | null {
   if (rsi["1h"] <= 30 && rsi["4h"] <= 30 && rsi["1d"] <= 30) return "oversold";
   if (rsi["1h"] >= 70 && rsi["4h"] >= 70 && rsi["1d"] >= 70) return "overbought";
   return null;
@@ -32,9 +32,14 @@ export function MarketHighlights({ tokens, signalsByToken }: MarketHighlightsPro
   for (const token of tokens) {
     const signals = signalsByToken[token.id];
     if (!signals) continue;
-    const direction = classifyDirection(signals.rsiByTimeframe);
+    const rsi = {
+      "1h": signals.byTimeframe["1h"].rsi,
+      "4h": signals.byTimeframe["4h"].rsi,
+      "1d": signals.byTimeframe["1d"].rsi,
+    };
+    const direction = classifyDirection(rsi);
     if (!direction) continue;
-    highlights.push({ tokenId: token.id, symbol: token.symbol, direction, rsi: signals.rsiByTimeframe });
+    highlights.push({ tokenId: token.id, symbol: token.symbol, direction, rsi });
   }
 
   if (highlights.length === 0) return null;

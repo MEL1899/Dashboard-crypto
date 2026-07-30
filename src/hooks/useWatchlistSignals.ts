@@ -20,7 +20,10 @@ import {
 import type { Timeframe } from "../types";
 
 export interface TokenSignals {
-  rsiByTimeframe: { "1h": number; "4h": number; "1d": number };
+  /** RSI/MACD/Bollinger/volume for each of the 3 timeframes — the raw
+   * inputs the confluence score below is built from, exposed so the UI can
+   * show exactly what went into the number instead of just the result. */
+  byTimeframe: Record<Timeframe, TimeframeSignal>;
   /** Multi-timeframe confluence score — identical wherever it's shown for
    * this token, independent of whatever timeframe the chart has open. */
   score: OpportunityScoreResult;
@@ -64,11 +67,7 @@ function buildTokenSignals(
   isDemo: boolean,
 ): TokenSignals {
   return {
-    rsiByTimeframe: {
-      "1h": byTimeframe["1h"].rsi,
-      "4h": byTimeframe["4h"].rsi,
-      "1d": byTimeframe["1d"].rsi,
-    },
+    byTimeframe,
     score: computeConfluenceScore(byTimeframe),
     isDemo,
   };
