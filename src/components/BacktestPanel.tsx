@@ -4,7 +4,7 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { Activity, ListChecks } from "lucide-react";
 import type { MarketToken } from "../types";
 import type { Currency } from "../lib/currency";
-import type { BacktestMode, BacktestResult } from "../lib/backtest";
+import { POSITION_SIZE_PCT, type BacktestMode, type BacktestResult, type ExitReason } from "../lib/backtest";
 import { BACKTEST_WINDOW_OPTIONS } from "../lib/backtestData";
 import { useBacktestAll, type BacktestSummary } from "../hooks/useBacktestAll";
 import { useRsiBacktestAll, type RsiBacktestSummary } from "../hooks/useRsiBacktestAll";
@@ -41,6 +41,13 @@ function StatTile({
     </div>
   );
 }
+
+const EXIT_REASON_LABEL: Record<ExitReason, string> = {
+  stop: "Stop",
+  target: "Alvo",
+  signal: "Sinal",
+  end: "Fim do período",
+};
 
 /** "DD/MM/AAAA a DD/MM/AAAA (N dias)" for the exact period the trades were
  * actually simulated over — the warmup candles aren't included, since no
@@ -202,11 +209,15 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
           operando comprado (long) E vendido (short): abre ou vira comprado no primeiro dia em
           que o score entra na faixa de compra escolhida abaixo, abre ou vira vendido no
           primeiro dia em que entra na faixa de venda — ou seja, também pode lucrar com o
-          mercado caindo, não só subindo. Usa só o timeframe diário — não a confluência completa
-          de 5 timeframes do app — e não modela taxas, slippage nem alavancagem. Buy & hold
-          aparece como referência de contexto, não como meta: o que importa aqui é o retorno
-          absoluto da estratégia. Trate como um teste de direção do sinal, não uma réplica exata
-          do score ao vivo, e lembre que desempenho passado não garante resultado futuro.
+          mercado caindo, não só subindo. Cada entrada já sai com stop-loss e take-profit
+          calculados a partir do suporte/resistência recente (mínima/máxima das últimas 20
+          velas), e só {POSITION_SIZE_PCT}% do capital fica alocado por trade — o resto fica de
+          fora, então um trade ruim nunca zera a conta sozinho. Usa só o timeframe diário — não
+          a confluência completa de 5 timeframes do app — e não modela taxas nem slippage. Buy &
+          hold aparece como referência de contexto, não como meta: o que importa aqui é o
+          retorno absoluto da estratégia. Trate como um teste de direção do sinal, não uma
+          réplica exata do score ao vivo, e lembre que desempenho passado não garante resultado
+          futuro.
         </p>
 
         {tokens.length === 0 ? (
@@ -275,7 +286,9 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
         <p className="mb-3 text-xs leading-relaxed text-[var(--color-text-dim)]">
           Estratégia bem mais simples que o score, também long/short: abre ou vira comprado
           quando o RSI cai a 30 ou menos, abre ou vira vendido quando sobe a 70 ou mais — sem
-          MACD, Bollinger, tendência ou força relativa. Útil como comparação direta: o score
+          MACD, Bollinger, tendência ou força relativa. Mesmo stop-loss/take-profit por
+          suporte-resistência e mesma alocação parcial ({POSITION_SIZE_PCT}% por trade) do
+          backtest de score, pra comparação justa. Útil como comparação direta: o score
           completo pode abrir uma compra mesmo com o RSI em sobrecompra moderada, se os outros
           indicadores (tendência, MACD, força relativa) estiverem fortes o bastante pra
           compensar — o que explica comprar perto de topos em movimentos de alta forte. Rodando
@@ -436,7 +449,9 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                 <p className="mb-2 text-xs text-[var(--color-text-dim)]">
                   "Saldo" simula {formatPrice(100, currency)} investidos no início, acumulando
                   o resultado de cada trade em sequência — assim dá pra ver a evolução real do
-                  capital, não só a % de cada operação isolada.
+                  capital, não só a % de cada operação isolada. "Motivo" mostra se o trade
+                  fechou no stop-loss, no take-profit (ambos calculados pelo suporte/resistência
+                  recente), por um sinal contrário, ou porque o período simulado acabou.
                 </p>
                 <table className="w-full text-left text-xs">
                   <thead className="text-[var(--color-text-dim)]">
@@ -446,6 +461,7 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                       <th className="py-1.5 pr-3 font-medium">Saída</th>
                       <th className="py-1.5 pr-3 font-medium">Preço entrada</th>
                       <th className="py-1.5 pr-3 font-medium">Preço saída</th>
+                      <th className="py-1.5 pr-3 font-medium">Motivo</th>
                       <th className="py-1.5 pr-3 font-medium">Retorno</th>
                       <th className="py-1.5 pr-3 font-medium">Saldo (base {formatPrice(100, currency)})</th>
                     </tr>
@@ -473,6 +489,9 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                         </td>
                         <td className="num-mono py-1.5 pr-3">{formatPrice(t.entryPrice, currency)}</td>
                         <td className="num-mono py-1.5 pr-3">{formatPrice(t.exitPrice, currency)}</td>
+                        <td className="py-1.5 pr-3 text-[var(--color-text-dim)]">
+                          {EXIT_REASON_LABEL[t.exitReason]}
+                        </td>
                         <td
                           className={clsx(
                             "num-mono py-1.5 pr-3 font-medium",

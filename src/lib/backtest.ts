@@ -11,6 +11,11 @@ import {
 } from "./indicators";
 import { computeOpportunityScore } from "./opportunityScore";
 
+/** Why a trade closed: "stop"/"target" fired intraday off the position's own
+ * SL/TP levels, "signal" means the opposite signal flipped the position
+ * first, "end" means it was still open when the simulated window ran out. */
+export type ExitReason = "stop" | "target" | "signal" | "end";
+
 export interface BacktestTrade {
   type: "long" | "short";
   entryTime: number;
@@ -18,6 +23,7 @@ export interface BacktestTrade {
   exitTime: number;
   exitPrice: number;
   returnPct: number;
+  exitReason: ExitReason;
   /** Running strategy equity right after this trade closed, on the same
    * "started at 100" basis as the equity curve — e.g. 100 → 111 reads as
    * "started with 100% of the stake, ended with 111%". */
@@ -57,6 +63,25 @@ const RELATIVE_STRENGTH_WINDOW = 20;
 // the binding constraint is the trend filter's 50-period SMA.
 const WARMUP_INDEX = 50;
 
+// Support/resistance is read off the lowest low / highest high of the last
+// 20 daily candles (a Donchian-style channel) as of entry day — simple,
+// causal (never looks past "today"), and close enough to how a discretionary
+// trader would eyeball recent structure.
+const SR_LOOKBACK = 20;
+// A stop derived straight from support/resistance can be absurdly close
+// (whipsaw risk) or absurdly far (barely a stop at all) depending on recent
+// structure, so it's clamped into a sane 3%-15% band around entry.
+const MIN_STOP_PCT = 3;
+const MAX_STOP_PCT = 15;
+// If the nearest resistance/support is closer than this multiple of the
+// stop distance, the target is extended to it instead — no point risking
+// more than you stand to gain.
+const MIN_REWARD_RISK_RATIO = 2;
+// Only a fraction of equity is committed to any single trade; the rest sits
+// out, so one stopped-out trade can only ever cost a bounded slice of the
+// account instead of being able to compound into a full wipeout.
+export const POSITION_SIZE_PCT = 50;
+
 /** "buy" opens/keeps a long, "sell" opens/keeps a short, "hold" leaves
  * whatever position (long, short, or flat) untouched. */
 type SignalAction = "buy" | "sell" | "hold";
@@ -69,6 +94,8 @@ interface OpenPosition {
   type: "long" | "short";
   entryTime: number;
   entryPrice: number;
+  stopPrice: number;
+  takeProfitPrice: number;
 }
 
 /** % return of one position at a given price — long profits as price rises,
@@ -79,20 +106,70 @@ function positionReturnPct(position: OpenPosition, price: number): number {
     : ((position.entryPrice - price) / position.entryPrice) * 100;
 }
 
-/** Equity multiplier for one position's return, floored at 0 — an
- * unleveraged position can lose its full stake but (in this simplified
- * model, no margin calls) never more. */
-function equityFactor(returnPct: number): number {
-  return Math.max(0, 1 + returnPct / 100);
+/** Equity multiplier for one position's return, applied only to the
+ * allocated slice of equity (see POSITION_SIZE_PCT) and floored at 0 — an
+ * unleveraged position can lose its full allocation but (in this simplified
+ * model, no margin calls) never more than that. */
+function equityFactor(returnPct: number, allocationFraction: number): number {
+  return Math.max(0, 1 - allocationFraction + allocationFraction * (1 + returnPct / 100));
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+/** Lowest low / highest high over the last SR_LOOKBACK candles of `window`
+ * (window already ends at "today", so this never looks ahead). */
+function supportResistance(window: Candle[]): { support: number; resistance: number } {
+  const slice = window.slice(-SR_LOOKBACK);
+  let support = Infinity;
+  let resistance = -Infinity;
+  for (const candle of slice) {
+    if (candle.low < support) support = candle.low;
+    if (candle.high > resistance) resistance = candle.high;
+  }
+  return { support, resistance };
+}
+
+/** Places a stop just past the nearest support/resistance (clamped to a
+ * sane distance) and a target at the next support/resistance level, or
+ * further out if that level is too close to be worth the risk. */
+function computeStopAndTarget(
+  type: "long" | "short",
+  entryPrice: number,
+  window: Candle[],
+): { stopPrice: number; takeProfitPrice: number } {
+  const { support, resistance } = supportResistance(window);
+  const minStopDistance = (entryPrice * MIN_STOP_PCT) / 100;
+  const maxStopDistance = (entryPrice * MAX_STOP_PCT) / 100;
+
+  if (type === "long") {
+    const rawStopDistance = entryPrice - support;
+    const stopDistance = clamp(rawStopDistance > 0 ? rawStopDistance : minStopDistance, minStopDistance, maxStopDistance);
+    const rawTargetDistance = resistance - entryPrice;
+    const targetDistance = Math.max(rawTargetDistance > 0 ? rawTargetDistance : 0, stopDistance * MIN_REWARD_RISK_RATIO);
+    return { stopPrice: entryPrice - stopDistance, takeProfitPrice: entryPrice + targetDistance };
+  }
+
+  const rawStopDistance = resistance - entryPrice;
+  const stopDistance = clamp(rawStopDistance > 0 ? rawStopDistance : minStopDistance, minStopDistance, maxStopDistance);
+  const rawTargetDistance = entryPrice - support;
+  const targetDistance = Math.max(rawTargetDistance > 0 ? rawTargetDistance : 0, stopDistance * MIN_REWARD_RISK_RATIO);
+  return { stopPrice: entryPrice + stopDistance, takeProfitPrice: entryPrice - targetDistance };
 }
 
 /**
  * Shared trade-simulation engine, long AND short: on a "buy" signal it
  * opens a long if flat, or flips a short straight into a long; a "sell"
  * signal does the mirror image (open/flip to short). "hold" leaves
- * whatever's open alone. Tracks equity/drawdown/buy-and-hold alongside it.
- * Both runBacktest (the full score) and runRsiOnlyBacktest (RSI alone) are
- * just this loop with a different `signal`.
+ * whatever's open alone. Every entry gets a stop-loss and take-profit
+ * derived from recent support/resistance, checked against each subsequent
+ * day's own high/low before that day's signal is even evaluated — so a
+ * position can exit on a bad day without waiting for the signal to catch
+ * up. Only a fraction of equity (POSITION_SIZE_PCT) is ever at risk in one
+ * trade. Tracks equity/drawdown/buy-and-hold alongside it. Both
+ * runBacktest (the full score) and runRsiOnlyBacktest (RSI alone) are just
+ * this loop with a different `signal`.
  */
 function simulate(candles: Candle[], signal: SignalFn): BacktestResult {
   if (candles.length <= WARMUP_INDEX) return EMPTY_RESULT;
@@ -101,42 +178,71 @@ function simulate(candles: Candle[], signal: SignalFn): BacktestResult {
   const equityCurve: BacktestPoint[] = [];
 
   let equity = 100;
+  // Deliberately assigned only with direct, inline `position = ...`
+  // statements in the loop below (never inside a nested function) — nested
+  // functions that write to it are literally not visible to TypeScript's
+  // control-flow analysis, which then can't ever prove it non-null again.
   let position: OpenPosition | null = null;
   const startPrice = candles[WARMUP_INDEX].close;
+  const allocationFraction = POSITION_SIZE_PCT / 100;
 
-  function close(exitTime: number, exitPrice: number) {
-    if (!position) return;
-    const returnPct = positionReturnPct(position, exitPrice);
-    equity *= equityFactor(returnPct);
+  // Books a closed trade's equity impact and record; does NOT touch
+  // `position` itself, so every call site clears it inline right after.
+  function recordTrade(closed: OpenPosition, exitTime: number, exitPrice: number, exitReason: ExitReason) {
+    const returnPct = positionReturnPct(closed, exitPrice);
+    equity *= equityFactor(returnPct, allocationFraction);
     trades.push({
-      type: position.type,
-      entryTime: position.entryTime,
-      entryPrice: position.entryPrice,
+      type: closed.type,
+      entryTime: closed.entryTime,
+      entryPrice: closed.entryPrice,
       exitTime,
       exitPrice,
       returnPct,
+      exitReason,
       equityAfter: equity,
     });
-    position = null;
   }
 
   for (let i = WARMUP_INDEX; i < candles.length; i++) {
     const window = candles.slice(0, i + 1);
-    const lastClose = window[window.length - 1].close;
-    const time = window[i].time;
-    const action = signal(window);
+    const today = window[window.length - 1];
+    const lastClose = today.close;
+    const time = today.time;
 
+    // A position opened on a previous day gets checked against today's own
+    // high/low first, before today's signal is even evaluated — this lets
+    // a stop/target fire on a day the signal itself never flips. If both
+    // levels fall inside today's range, the stop is assumed to hit first
+    // (the conservative assumption, since intraday order is unknown).
+    if (position) {
+      const stopped = position.type === "long" ? today.low <= position.stopPrice : today.high >= position.stopPrice;
+      const targetHit =
+        position.type === "long" ? today.high >= position.takeProfitPrice : today.low <= position.takeProfitPrice;
+      if (stopped) {
+        recordTrade(position, time, position.stopPrice, "stop");
+        position = null;
+      } else if (targetHit) {
+        recordTrade(position, time, position.takeProfitPrice, "target");
+        position = null;
+      }
+    }
+
+    const action = signal(window);
     if (action === "buy" && position?.type !== "long") {
-      close(time, lastClose);
-      position = { type: "long", entryTime: time, entryPrice: lastClose };
+      if (position) recordTrade(position, time, lastClose, "signal");
+      const { stopPrice, takeProfitPrice } = computeStopAndTarget("long", lastClose, window);
+      position = { type: "long", entryTime: time, entryPrice: lastClose, stopPrice, takeProfitPrice };
     } else if (action === "sell" && position?.type !== "short") {
-      close(time, lastClose);
-      position = { type: "short", entryTime: time, entryPrice: lastClose };
+      if (position) recordTrade(position, time, lastClose, "signal");
+      const { stopPrice, takeProfitPrice } = computeStopAndTarget("short", lastClose, window);
+      position = { type: "short", entryTime: time, entryPrice: lastClose, stopPrice, takeProfitPrice };
     }
 
     equityCurve.push({
       time,
-      equity: position ? equity * equityFactor(positionReturnPct(position, lastClose)) : equity,
+      equity: position
+        ? equity * equityFactor(positionReturnPct(position, lastClose), allocationFraction)
+        : equity,
       buyHoldEquity: (lastClose / startPrice) * 100,
     });
   }
@@ -145,7 +251,8 @@ function simulate(candles: Candle[], signal: SignalFn): BacktestResult {
   // final number instead of leaving it as an unrealized, open position.
   if (position) {
     const last = candles[candles.length - 1];
-    close(last.time, last.close);
+    recordTrade(position, last.time, last.close, "end");
+    position = null;
   }
 
   let peak = -Infinity;

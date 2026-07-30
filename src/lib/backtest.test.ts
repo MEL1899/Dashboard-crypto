@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runBacktest, runRsiOnlyBacktest } from "./backtest";
+import { POSITION_SIZE_PCT, runBacktest, runRsiOnlyBacktest } from "./backtest";
 import type { Candle } from "../types";
 
 function makeCandles(closes: number[], startTime = 0, stepSeconds = 86400): Candle[] {
@@ -129,14 +129,32 @@ describe("runBacktest", () => {
   it("equityAfter compounds the trades in order, starting from 100, and matches the final strategy return", () => {
     const candles = makeCandles(syntheticSeries(150));
     const result = runBacktest(candles, null);
+    const allocation = POSITION_SIZE_PCT / 100;
     let expectedEquity = 100;
     for (const trade of result.trades) {
-      expectedEquity *= Math.max(0, 1 + trade.returnPct / 100);
+      expectedEquity *= Math.max(0, 1 - allocation + allocation * (1 + trade.returnPct / 100));
       expect(trade.equityAfter).toBeCloseTo(expectedEquity, 6);
     }
     if (result.trades.length > 0) {
       const lastEquityAfter = result.trades[result.trades.length - 1].equityAfter;
       expect(lastEquityAfter).toBeCloseTo(100 + result.strategyReturnPct, 6);
+    }
+  });
+
+  it("stop-triggered exits are losses and target-triggered exits are gains", () => {
+    const candles = makeCandles(syntheticSeries(150));
+    const result = runBacktest(candles, null);
+    for (const trade of result.trades) {
+      if (trade.exitReason === "stop") expect(trade.returnPct).toBeLessThanOrEqual(0);
+      if (trade.exitReason === "target") expect(trade.returnPct).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("tags every trade with a valid exit reason", () => {
+    const candles = makeCandles(syntheticSeries(150));
+    const result = runBacktest(candles, null);
+    for (const trade of result.trades) {
+      expect(["stop", "target", "signal", "end"]).toContain(trade.exitReason);
     }
   });
 });
