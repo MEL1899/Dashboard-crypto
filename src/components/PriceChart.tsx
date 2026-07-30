@@ -51,6 +51,17 @@ export function PriceChart({ candles, bollinger, rsi, volume, theme }: PriceChar
     });
     chartRef.current = chart;
 
+    // Same "cents stop being meaningful at four figures" rule as
+    // formatPrice (components/common.tsx) — BTC/ETH-range prices show
+    // whole numbers on the axis instead of $67,682.62. All series sharing
+    // this pane's price scale need the same precision, so it's computed
+    // once here from the latest close.
+    const lastClose = candles.length > 0 ? candles[candles.length - 1].close : 0;
+    const priceFormat =
+      Math.abs(lastClose) >= 1000
+        ? { type: "price" as const, precision: 0, minMove: 1 }
+        : { type: "price" as const, precision: 2, minMove: 0.01 };
+
     // Pane 0: candlesticks + Bollinger Bands overlay
     const candleSeries = chart.addSeries(
       CandlestickSeries,
@@ -60,6 +71,7 @@ export function PriceChart({ candles, bollinger, rsi, volume, theme }: PriceChar
         borderVisible: false,
         wickUpColor: "#0ca30c",
         wickDownColor: "#d03b3b",
+        priceFormat,
       },
       0,
     );
@@ -91,6 +103,7 @@ export function PriceChart({ candles, bollinger, rsi, volume, theme }: PriceChar
           // matching the detail card's Bollinger Bands display above.
           lastValueVisible: key !== "middle",
           priceLineVisible: false,
+          priceFormat,
         },
         0,
       );

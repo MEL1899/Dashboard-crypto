@@ -148,7 +148,10 @@ export function formatMoney(value: number, currency: Currency): string {
  * For a per-coin price (or a price level like a Bollinger band) — never
  * abbreviated to K/M/B, since that reads as a different number than the
  * price someone would actually see quoted (e.g. $67,682.62, not $67.68K).
- * Small-value tokens get more decimal places so they don't round to 0.
+ * Small-value tokens get more decimal places so they don't round to 0;
+ * four-figure-and-up tokens (BTC, ETH, ...) drop the cents entirely, since
+ * at that scale they're just noise — nobody reads $67,682.62 any
+ * differently than $67,682.
  */
 export function formatPrice(value: number, currency: Currency): string {
   if (!Number.isFinite(value)) return "-";
@@ -161,6 +164,9 @@ export function formatPrice(value: number, currency: Currency): string {
   // always "$"/"R$" chosen above, so the digit grouping has to match it —
   // "undefined" here would format as "$1.521,68" for a pt-BR browser, a
   // currency symbol glued to the wrong separator convention.
+  if (abs >= 1000) {
+    return `${symbol}${converted.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+  }
   return `${symbol}${converted.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
