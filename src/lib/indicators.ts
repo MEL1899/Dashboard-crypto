@@ -144,3 +144,18 @@ export function bbSignal(
   if (close <= band.lower) return "below-lower";
   return "inside";
 }
+
+/**
+ * Whether the latest candle's volume is a real spike (>= 1.5x the trailing
+ * average), the classic "does the move have volume behind it" check — a
+ * price touching a support/resistance band on unusually high volume is a
+ * more meaningful signal than the same touch on quiet, average volume.
+ */
+export function isVolumeSpike(candles: Candle[], period = 20): boolean {
+  if (candles.length < period + 1) return false;
+  const window = candles.slice(-period - 1, -1);
+  const avgVolume = window.reduce((sum, c) => sum + c.volume, 0) / window.length;
+  if (avgVolume <= 0) return false;
+  const lastVolume = candles[candles.length - 1].volume;
+  return lastVolume / avgVolume >= 1.5;
+}

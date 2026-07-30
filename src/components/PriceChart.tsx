@@ -21,8 +21,8 @@ interface PriceChartProps {
 // properties — so each theme needs its own literal color set here, kept in
 // sync with the tokens in index.css.
 const THEME_COLORS = {
-  dark: { bg: "#12141c", grid: "#1c1f2a", text: "#8b93a7", accent: "#4f7cff", rsiLine: "#22d3ee" },
-  light: { bg: "#ffffff", grid: "#e4e7ee", text: "#5b6472", accent: "#3a63e0", rsiLine: "#0a8fa6" },
+  dark: { bg: "#12141c", grid: "#1c1f2a", text: "#8b93a7", rsiLine: "#22d3ee" },
+  light: { bg: "#ffffff", grid: "#e4e7ee", text: "#5b6472", rsiLine: "#0a8fa6" },
 };
 
 export function PriceChart({ candles, bollinger, rsi, volume, theme }: PriceChartProps) {
@@ -99,14 +99,24 @@ export function PriceChart({ candles, bollinger, rsi, volume, theme }: PriceChar
       );
     }
 
-    // Pane 1: volume
+    // Pane 1: volume, colored per-bar by that candle's direction (same
+    // green/red as the candlesticks) instead of one flat accent color —
+    // makes it readable at a glance which side pushed the volume.
     const volumeSeries = chart.addSeries(
       HistogramSeries,
-      { color: `${colors.accent}80`, priceFormat: { type: "volume" } },
+      { priceFormat: { type: "volume" } },
       1,
     );
     volumeSeries.setData(
-      volume.map((v) => ({ time: v.time as UTCTimestamp, value: v.value })),
+      volume.map((v, i) => {
+        const candle = candles[i];
+        const isUp = !candle || candle.close >= candle.open;
+        return {
+          time: v.time as UTCTimestamp,
+          value: v.value,
+          color: isUp ? "#0ca30c80" : "#d03b3b80",
+        };
+      }),
     );
 
     // Pane 2: RSI

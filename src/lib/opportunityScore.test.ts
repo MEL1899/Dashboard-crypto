@@ -47,7 +47,12 @@ function bySignal(h1: TimeframeSignal, h4: TimeframeSignal, d1: TimeframeSignal)
 
 describe("computeConfluenceScore", () => {
   it("averages RSI across the 3 timeframes instead of reading just one", () => {
-    const neutral: TimeframeSignal = { rsi: 50, macd: "neutral", bbPosition: "inside" };
+    const neutral: TimeframeSignal = {
+      rsi: 50,
+      macd: "neutral",
+      bbPosition: "inside",
+      volumeSpike: false,
+    };
     const result = computeConfluenceScore(
       bySignal(
         { ...neutral, rsi: 30 },
@@ -62,9 +67,9 @@ describe("computeConfluenceScore", () => {
   it("takes the MACD/Bollinger signal that wins 2 of 3 timeframes", () => {
     const result = computeConfluenceScore(
       bySignal(
-        { rsi: 50, macd: "bullish", bbPosition: "inside" },
-        { rsi: 50, macd: "bullish", bbPosition: "inside" },
-        { rsi: 50, macd: "bearish", bbPosition: "inside" },
+        { rsi: 50, macd: "bullish", bbPosition: "inside", volumeSpike: false },
+        { rsi: 50, macd: "bullish", bbPosition: "inside", volumeSpike: false },
+        { rsi: 50, macd: "bearish", bbPosition: "inside", volumeSpike: false },
       ),
     );
     // 2 of 3 timeframes say bullish MACD -> score should move up, not stay neutral.
@@ -74,13 +79,33 @@ describe("computeConfluenceScore", () => {
   it("a single timeframe can't swing the result on its own — needs the majority of the 3", () => {
     const result = computeConfluenceScore(
       bySignal(
-        { rsi: 20, macd: "bullish", bbPosition: "below-lower" }, // 1h alone reads strongly bullish
-        { rsi: 60, macd: "bearish", bbPosition: "above-upper" }, // 4h and 1d both read bearish
-        { rsi: 65, macd: "bearish", bbPosition: "above-upper" },
+        // 1h alone reads strongly bullish
+        { rsi: 20, macd: "bullish", bbPosition: "below-lower", volumeSpike: false },
+        // 4h and 1d both read bearish
+        { rsi: 60, macd: "bearish", bbPosition: "above-upper", volumeSpike: false },
+        { rsi: 65, macd: "bearish", bbPosition: "above-upper", volumeSpike: false },
       ),
     );
     // The 4h/1d majority (bearish MACD, above-upper BB) should win out over
     // 1h looking bullish on its own.
     expect(result.score).toBeLessThan(50);
+  });
+
+  it("amplifies a Bollinger-band touch when at least 2 of 3 timeframes confirm it with volume", () => {
+    const withoutVolume = computeConfluenceScore(
+      bySignal(
+        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false },
+        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false },
+        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false },
+      ),
+    );
+    const withVolume = computeConfluenceScore(
+      bySignal(
+        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: true },
+        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: true },
+        { rsi: 50, macd: "neutral", bbPosition: "below-lower", volumeSpike: false },
+      ),
+    );
+    expect(withVolume.score).toBeGreaterThan(withoutVolume.score);
   });
 });

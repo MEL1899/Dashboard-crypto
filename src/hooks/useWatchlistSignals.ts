@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchKlines, symbolForToken } from "../lib/binance";
 import { fetchCandlesForTimeframe } from "../lib/coingecko";
-import { calcBollingerBands, calcMACD, calcRSI, macdSignal, bbSignal } from "../lib/indicators";
+import {
+  bbSignal,
+  calcBollingerBands,
+  calcMACD,
+  calcRSI,
+  isVolumeSpike,
+  macdSignal,
+} from "../lib/indicators";
 import { mockSignalsByTimeframe } from "../lib/mock";
 import {
   computeConfluenceScore,
@@ -41,7 +48,12 @@ async function fetchOneTimeframeSignal(
     const lastBb = bbSeries[bbSeries.length - 1];
     const bbPosition: BbPosition = lastCandle && lastBb ? bbSignal(lastCandle.close, lastBb) : "inside";
     const macd: MacdSignal = macdSignal(calcMACD(candles));
-    return { rsi: Math.round(rsiSeries[rsiSeries.length - 1].value), macd, bbPosition };
+    return {
+      rsi: Math.round(rsiSeries[rsiSeries.length - 1].value),
+      macd,
+      bbPosition,
+      volumeSpike: isVolumeSpike(candles),
+    };
   } catch {
     return null;
   }

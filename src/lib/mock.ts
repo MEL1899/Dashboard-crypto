@@ -9,7 +9,7 @@ import type {
   WalletTransaction,
 } from "../types";
 import type { WalletSnapshot } from "./etherscan";
-import { bbSignal, calcBollingerBands, calcMACD, calcRSI, macdSignal } from "./indicators";
+import { bbSignal, calcBollingerBands, calcMACD, calcRSI, isVolumeSpike, macdSignal } from "./indicators";
 import type { MacdSignal, BbPosition } from "./opportunityScore";
 
 // Deterministic PRNG so demo mode looks the same across reloads/screenshots.
@@ -151,7 +151,7 @@ export function mockCandles(tokenId: string, timeframe: Timeframe): Candle[] {
  */
 export function mockSignalsByTimeframe(
   tokenId: string,
-): Record<Timeframe, { rsi: number; macd: MacdSignal; bbPosition: BbPosition }> {
+): Record<Timeframe, { rsi: number; macd: MacdSignal; bbPosition: BbPosition; volumeSpike: boolean }> {
   const signalForTimeframe = (timeframe: Timeframe) => {
     const candles = mockCandles(tokenId, timeframe);
     const rsiSeries = calcRSI(candles);
@@ -162,6 +162,7 @@ export function mockSignalsByTimeframe(
       rsi: rsiSeries.length > 0 ? Math.round(rsiSeries[rsiSeries.length - 1].value) : 50,
       macd: macdSignal(calcMACD(candles)),
       bbPosition: lastCandle && lastBb ? bbSignal(lastCandle.close, lastBb) : ("inside" as const),
+      volumeSpike: isVolumeSpike(candles),
     };
   };
   return {

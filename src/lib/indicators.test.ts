@@ -6,6 +6,7 @@ import {
   calcRSI,
   calcSMA,
   calcVolumeSeries,
+  isVolumeSpike,
   macdSignal,
   rsiSignal,
 } from "./indicators";
@@ -130,6 +131,23 @@ describe("macdSignal", () => {
     expect(macdSignal([{ time: 0, macd: 1, signal: 0.5, histogram: 0.5 }])).toBe("bullish");
     expect(macdSignal([{ time: 0, macd: 0.5, signal: 1, histogram: -0.5 }])).toBe("bearish");
     expect(macdSignal([{ time: 0, macd: 1, signal: 1, histogram: 0 }])).toBe("neutral");
+  });
+});
+
+describe("isVolumeSpike", () => {
+  it("returns false when there is not enough data", () => {
+    expect(isVolumeSpike(makeCandles([1, 2, 3]), 20)).toBe(false);
+  });
+
+  it("returns false when the last candle's volume is near the trailing average", () => {
+    const candles = makeCandles(Array(21).fill(50)); // volumes climb gently, 100..120
+    expect(isVolumeSpike(candles, 20)).toBe(false);
+  });
+
+  it("returns true when the last candle's volume spikes well above the trailing average", () => {
+    const candles = makeCandles(Array(21).fill(50));
+    candles[candles.length - 1] = { ...candles[candles.length - 1], volume: 10000 };
+    expect(isVolumeSpike(candles, 20)).toBe(true);
   });
 });
 

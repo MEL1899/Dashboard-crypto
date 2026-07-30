@@ -115,6 +115,13 @@ export function MarketOverview({
                 superior, −15 (possível sobrecompra) — também pela posição que aparece na maioria
                 dos 3 timeframes.
               </li>
+              <li>
+                <strong className="text-[var(--color-text)]">Volume</strong> — quando o preço
+                toca uma das bandas de Bollinger (suporte ou resistência) com volume pelo menos
+                50% acima da média dos últimos 20 períodos em 2 dos 3 timeframes, isso é tratado
+                como confirmação do movimento: os +15/−15 da banda viram{" "}
+                <strong className="text-[var(--color-text)]">+20/−20</strong>.
+              </li>
             </ul>
             <p>
               O resultado é limitado entre 0 e 100 e classificado em 5 faixas:{" "}
