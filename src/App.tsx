@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, type ReactNode } from "react";
 import clsx from "clsx";
-import { BarChart2, LayoutDashboard, Moon, Settings, Sun, Wallet, X } from "lucide-react";
+import { BarChart2, History, LayoutDashboard, Moon, Settings, Sun, Wallet, X } from "lucide-react";
 import { useMarketData } from "./hooks/useMarketData";
 import { useWatchlistTokens } from "./hooks/useWatchlistTokens";
 import { useWatchlistSignals } from "./hooks/useWatchlistSignals";
@@ -35,6 +35,9 @@ const PriceChart = lazy(() =>
 const WalletPanel = lazy(() =>
   import("./components/WalletPanel").then((m) => ({ default: m.WalletPanel })),
 );
+const BacktestPanel = lazy(() =>
+  import("./components/BacktestPanel").then((m) => ({ default: m.BacktestPanel })),
+);
 
 function TabFallback() {
   return (
@@ -52,7 +55,7 @@ const TIMEFRAME_OPTIONS: { label: string; value: Timeframe }[] = [
   { label: "1M", value: "1M" },
 ];
 
-type Tab = "market" | "wallet";
+type Tab = "market" | "wallet" | "backtest";
 
 function App() {
   const [settings, setSettings] = useState(loadSettings());
@@ -174,6 +177,9 @@ function App() {
             </TabButton>
             <TabButton active={tab === "wallet"} onClick={() => setTab("wallet")} icon={<Wallet size={14} />}>
               Carteira
+            </TabButton>
+            <TabButton active={tab === "backtest"} onClick={() => setTab("backtest")} icon={<History size={14} />}>
+              Backtest
             </TabButton>
           </nav>
 
@@ -345,7 +351,7 @@ function App() {
               </>
             )}
           </div>
-        ) : (
+        ) : tab === "wallet" ? (
           <Suspense fallback={<TabFallback />}>
             <WalletPanel
               address={walletQuery.address}
@@ -355,6 +361,14 @@ function App() {
               error={wallet.error}
               snapshot={wallet.snapshot}
               onSubmit={handleWalletSubmit}
+            />
+          </Suspense>
+        ) : (
+          <Suspense fallback={<TabFallback />}>
+            <BacktestPanel
+              tokens={watchlistTokens.tokens}
+              apiKey={settings.coingeckoApiKey || undefined}
+              currency={MERCADO_CURRENCY}
             />
           </Suspense>
         )}

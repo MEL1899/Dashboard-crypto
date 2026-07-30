@@ -1,0 +1,56 @@
+import { useState } from "react";
+import { fetchKlines, symbolForToken } from "../lib/binance";
+import { fetchCandlesForTimeframe } from "../lib/coingecko";
+import { mockCandles } from "../lib/mock";
+import { runBacktest, type BacktestResult } from "../lib/backtest";
+import type { Candle } from "../types";
+
+interface BacktestState {
+  loading: boolean;
+  error: string | null;
+  isDemo: boolean;
+  result: BacktestResult | null;
+}
+
+const IDLE_STATE: BacktestState = { loading: false, error: null, isDemo: false, result: null };
+
+async function fetchDailyCandles(tokenId: string, apiKey?: string): Promise<Candle[]> {
+  const symbol = symbolForToken(tokenId);
+  return symbol ? await fetchKlines(symbol, "1d") : await fetchCandlesForTimeframe(tokenId, "1d", apiKey);
+}
+
+const BTC_TOKEN_ID = "bitcoin";
+
+/**
+ * Runs on demand (not on a timer/mount, since it's a heavier one-off
+ * simulation) — fetches daily candles for the chosen token plus BTC (for
+ * the relative-strength signal), then hands them to lib/backtest.ts.
+ */
+export function useBacktest() {
+  const [state, setState] = useState<BacktestState>(IDLE_STATE);
+
+  async function run(tokenId: string, apiKey?: string) {
+    setState({ loading: true, error: null, isDemo: false, result: null });
+    try {
+      const [candles, btcCandles] = await Promise.all([
+        fetchDailyCandles(tokenId, apiKey),
+        tokenId === BTC_TOKEN_ID ? Promise.resolve(null) : fetchDailyCandles(BTC_TOKEN_ID, apiKey),
+      ]);
+      setState({ loading: false, error: null, isDemo: false, result: runBacktest(candles, btcCandles) });
+    } catch (err) {
+      // Same resilience pattern as the rest of the app: fall back to the
+      // deterministic mock so the feature still demonstrates itself
+      // instead of just failing.
+      const candles = mockCandles(tokenId, "1d");
+      const btcCandles = tokenId === BTC_TOKEN_ID ? null : mockCandles(BTC_TOKEN_ID, "1d");
+      setState({
+        loading: false,
+        error: err instanceof Error ? err.message : "Failed to run backtest",
+        isDemo: true,
+        result: runBacktest(candles, btcCandles),
+      });
+    }
+  }
+
+  return { ...state, run };
+}
