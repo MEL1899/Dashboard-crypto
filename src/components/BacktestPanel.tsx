@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import clsx from "clsx";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Play } from "lucide-react";
+import { ListChecks, Play } from "lucide-react";
 import type { MarketToken } from "../types";
 import type { Currency } from "../lib/currency";
 import { useBacktest } from "../hooks/useBacktest";
+import { useBacktestAll } from "../hooks/useBacktestAll";
 import { Card, Spinner, formatPrice } from "./common";
 
 interface BacktestPanelProps {
@@ -42,11 +43,36 @@ function StatTile({
 export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) {
   const [tokenId, setTokenId] = useState(tokens[0]?.id ?? "");
   const backtest = useBacktest();
+  const batch = useBacktestAll();
 
   function handleRun() {
     if (!tokenId) return;
     backtest.run(tokenId, apiKey);
   }
+
+  function handleRunAll() {
+    if (tokens.length === 0) return;
+    batch.runAll(tokens, apiKey);
+  }
+
+  function handleSelectFromSummary(id: string) {
+    setTokenId(id);
+    backtest.run(id, apiKey);
+  }
+
+  // Ranked by how much the score's timing beat (or lagged) just holding —
+  // the number that actually answers "is this worth automating for this
+  // token", more than the raw strategy return alone would.
+  const rankedSummaries = useMemo(
+    () =>
+      [...batch.summaries].sort(
+        (a, b) =>
+          b.result.strategyReturnPct -
+          b.result.buyHoldReturnPct -
+          (a.result.strategyReturnPct - a.result.buyHoldReturnPct),
+      ),
+    [batch.summaries],
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -66,29 +92,117 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
             Adicione moedas à watchlist na aba Mercado para poder rodar um backtest.
           </p>
         ) : (
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={tokenId}
-              onChange={(e) => setTokenId(e.target.value)}
-              className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
-            >
-              {tokens.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.symbol} — {t.name}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={handleRun}
-              disabled={backtest.loading}
-              className="flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
-            >
-              {backtest.loading ? <Spinner /> : <Play size={14} />}
-              Rodar backtest
-            </button>
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={tokenId}
+                onChange={(e) => setTokenId(e.target.value)}
+                className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+              >
+                {tokens.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.symbol} — {t.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={handleRun}
+                disabled={backtest.loading}
+                className="flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
+              >
+                {backtest.loading ? <Spinner /> : <Play size={14} />}
+                Rodar backtest
+              </button>
+              <button
+                onClick={handleRunAll}
+                disabled={batch.running}
+                className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-text-dim)] hover:text-[var(--color-text)] disabled:opacity-60"
+              >
+                {batch.running ? <Spinner /> : <ListChecks size={14} />}
+                Rodar para toda a watchlist ({tokens.length})
+              </button>
+            </div>
+            {batch.running && (
+              <p className="text-xs text-[var(--color-text-dim)]">
+                Rodando {batch.progress.done} de {batch.progress.total}...
+              </p>
+            )}
           </div>
         )}
       </Card>
+
+      {rankedSummaries.length > 0 && (
+        <Card title="Comparação da watchlist">
+          <p className="mb-2 text-xs text-[var(--color-text-dim)]">
+            Ordenado pela diferença entre a estratégia e simplesmente segurar (buy & hold) —
+            clique numa linha pra ver os trades em detalhe abaixo.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="text-[var(--color-text-dim)]">
+                <tr>
+                  <th className="py-1.5 pr-3 font-medium">Ativo</th>
+                  <th className="py-1.5 pr-3 font-medium">Estratégia</th>
+                  <th className="py-1.5 pr-3 font-medium">Buy & Hold</th>
+                  <th className="py-1.5 pr-3 font-medium">Diferença</th>
+                  <th className="py-1.5 pr-3 font-medium">Trades</th>
+                  <th className="py-1.5 pr-3 font-medium">Acerto</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rankedSummaries.map((s) => {
+                  const diff = s.result.strategyReturnPct - s.result.buyHoldReturnPct;
+                  return (
+                    <tr
+                      key={s.tokenId}
+                      onClick={() => handleSelectFromSummary(s.tokenId)}
+                      className={clsx(
+                        "cursor-pointer border-t border-[var(--color-border)] transition-colors hover:bg-white/5",
+                        s.tokenId === tokenId && "bg-[var(--color-accent)]/10",
+                      )}
+                    >
+                      <td className="py-1.5 pr-3 font-medium text-[var(--color-text)]">
+                        {s.symbol}
+                        {s.isDemo && (
+                          <span className="ml-1 text-[10px] text-[var(--color-text-dim)]">(demo)</span>
+                        )}
+                      </td>
+                      <td
+                        className={clsx(
+                          "num-mono py-1.5 pr-3",
+                          s.result.strategyReturnPct >= 0 ? "text-[var(--color-up)]" : "text-[var(--color-down)]",
+                        )}
+                      >
+                        {s.result.strategyReturnPct >= 0 ? "+" : ""}
+                        {s.result.strategyReturnPct.toFixed(1)}%
+                      </td>
+                      <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
+                        {s.result.buyHoldReturnPct >= 0 ? "+" : ""}
+                        {s.result.buyHoldReturnPct.toFixed(1)}%
+                      </td>
+                      <td
+                        className={clsx(
+                          "num-mono py-1.5 pr-3 font-medium",
+                          diff >= 0 ? "text-[var(--color-up)]" : "text-[var(--color-down)]",
+                        )}
+                      >
+                        {diff >= 0 ? "+" : ""}
+                        {diff.toFixed(1)}%
+                      </td>
+                      <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
+                        {s.result.trades.length}
+                      </td>
+                      <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
+                        {s.result.trades.length > 0 ? `${s.result.winRate.toFixed(0)}%` : "-"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       {backtest.isDemo && backtest.result && (
         <div className="rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-3 py-2 text-xs text-[var(--color-text)]">

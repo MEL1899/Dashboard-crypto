@@ -1,9 +1,7 @@
 import { useState } from "react";
-import { fetchKlines, symbolForToken } from "../lib/binance";
-import { fetchCandlesForTimeframe } from "../lib/coingecko";
 import { mockCandles } from "../lib/mock";
 import { runBacktest, type BacktestResult } from "../lib/backtest";
-import type { Candle } from "../types";
+import { BTC_TOKEN_ID, fetchDailyCandles } from "../lib/backtestData";
 
 interface BacktestState {
   loading: boolean;
@@ -13,13 +11,6 @@ interface BacktestState {
 }
 
 const IDLE_STATE: BacktestState = { loading: false, error: null, isDemo: false, result: null };
-
-async function fetchDailyCandles(tokenId: string, apiKey?: string): Promise<Candle[]> {
-  const symbol = symbolForToken(tokenId);
-  return symbol ? await fetchKlines(symbol, "1d") : await fetchCandlesForTimeframe(tokenId, "1d", apiKey);
-}
-
-const BTC_TOKEN_ID = "bitcoin";
 
 /**
  * Runs on demand (not on a timer/mount, since it's a heavier one-off
