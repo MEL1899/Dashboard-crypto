@@ -58,21 +58,35 @@ const EMPTY_RESULT: BacktestResult = {
   maxDrawdownPct: 0,
 };
 
+/** Candle granularity the backtest can run on — a subset of the app's full
+ * Timeframe type, since a swing-trade backtest over 1w/1M candles wouldn't
+ * produce enough trades to mean anything. */
+export type BacktestTimeframe = "1h" | "4h" | "1d";
+
 const RELATIVE_STRENGTH_WINDOW = 20;
-// Needs enough daily candles for every indicator to produce a real read —
-// the binding constraint is the trend filter's 50-period SMA.
+// Needs enough candles for every indicator to produce a real read — the
+// binding constraint is the trend filter's 50-period SMA. Expressed in
+// candles (bars), not calendar time, same as real indicator periods — 50
+// candles is ~2 days on 1h, ~8 days on 4h, ~50 days on 1d.
 const WARMUP_INDEX = 50;
 
 // Support/resistance is read off the lowest low / highest high of the last
-// 20 daily candles (a Donchian-style channel) as of entry day — simple,
-// causal (never looks past "today"), and close enough to how a discretionary
-// trader would eyeball recent structure.
+// 20 candles (a Donchian-style channel) as of entry day — simple, causal
+// (never looks past "today"), and close enough to how a discretionary
+// trader would eyeball recent structure. Also in candles, not calendar
+// time, for the same reason as WARMUP_INDEX.
 const SR_LOOKBACK = 20;
 // A stop derived straight from support/resistance can be absurdly close
 // (whipsaw risk) or absurdly far (barely a stop at all) depending on recent
-// structure, so it's clamped into a sane 3%-15% band around entry.
-const MIN_STOP_PCT = 3;
-const MAX_STOP_PCT = 15;
+// structure, so it's clamped into a sane band around entry — sized per
+// timeframe, since a 3% move is a routine daily swing but a huge move on an
+// hourly candle. Scaled roughly by sqrt(time) from the 1d bounds (standard
+// volatility-scaling rule of thumb): 4h is ~1/6 of a day, 1h is ~1/24.
+const STOP_BOUNDS_PCT: Record<BacktestTimeframe, { min: number; max: number }> = {
+  "1d": { min: 3, max: 15 },
+  "4h": { min: 1.5, max: 7 },
+  "1h": { min: 0.75, max: 3.5 },
+};
 // If the nearest resistance/support is closer than this multiple of the
 // stop distance, the target is extended to it instead — no point risking
 // more than you stand to gain.
@@ -132,16 +146,19 @@ function supportResistance(window: Candle[]): { support: number; resistance: num
 }
 
 /** Places a stop just past the nearest support/resistance (clamped to a
- * sane distance) and a target at the next support/resistance level, or
- * further out if that level is too close to be worth the risk. */
+ * sane, timeframe-appropriate distance) and a target at the next
+ * support/resistance level, or further out if that level is too close to
+ * be worth the risk. */
 function computeStopAndTarget(
   type: "long" | "short",
   entryPrice: number,
   window: Candle[],
+  timeframe: BacktestTimeframe,
 ): { stopPrice: number; takeProfitPrice: number } {
   const { support, resistance } = supportResistance(window);
-  const minStopDistance = (entryPrice * MIN_STOP_PCT) / 100;
-  const maxStopDistance = (entryPrice * MAX_STOP_PCT) / 100;
+  const bounds = STOP_BOUNDS_PCT[timeframe];
+  const minStopDistance = (entryPrice * bounds.min) / 100;
+  const maxStopDistance = (entryPrice * bounds.max) / 100;
 
   if (type === "long") {
     const rawStopDistance = entryPrice - support;
@@ -171,7 +188,7 @@ function computeStopAndTarget(
  * runBacktest (the full score) and runRsiOnlyBacktest (RSI alone) are just
  * this loop with a different `signal`.
  */
-function simulate(candles: Candle[], signal: SignalFn): BacktestResult {
+function simulate(candles: Candle[], signal: SignalFn, timeframe: BacktestTimeframe): BacktestResult {
   if (candles.length <= WARMUP_INDEX) return EMPTY_RESULT;
 
   const trades: BacktestTrade[] = [];
@@ -230,11 +247,11 @@ function simulate(candles: Candle[], signal: SignalFn): BacktestResult {
     const action = signal(window);
     if (action === "buy" && position?.type !== "long") {
       if (position) recordTrade(position, time, lastClose, "signal");
-      const { stopPrice, takeProfitPrice } = computeStopAndTarget("long", lastClose, window);
+      const { stopPrice, takeProfitPrice } = computeStopAndTarget("long", lastClose, window, timeframe);
       position = { type: "long", entryTime: time, entryPrice: lastClose, stopPrice, takeProfitPrice };
     } else if (action === "sell" && position?.type !== "short") {
       if (position) recordTrade(position, time, lastClose, "signal");
-      const { stopPrice, takeProfitPrice } = computeStopAndTarget("short", lastClose, window);
+      const { stopPrice, takeProfitPrice } = computeStopAndTarget("short", lastClose, window, timeframe);
       position = { type: "short", entryTime: time, entryPrice: lastClose, stopPrice, takeProfitPrice };
     }
 
@@ -292,50 +309,54 @@ export type BacktestMode = "any" | "strongOnly";
  * future.
  *
  * This intentionally simplifies the live app's 5-timeframe confluence down
- * to a single daily timeframe: getting deep 1h/4h/1w/1M history for the
- * same historical window isn't practical from these free APIs, so a
- * faithful multi-timeframe backtest isn't possible here. No fees, slippage,
- * or leverage are modeled either. Treat the result as a directional check
- * on whether the underlying signal has any edge at all, not a precise
- * replay of the live score, and remember past performance doesn't
- * guarantee future results.
+ * to a single chosen timeframe (1h/4h/1d) at a time: a faithful
+ * multi-timeframe confluence backtest isn't practical from these free
+ * APIs. No fees or slippage are modeled either. Treat the result as a
+ * directional check on whether the underlying signal has any edge at all,
+ * not a precise replay of the live score, and remember past performance
+ * doesn't guarantee future results.
  */
 export function runBacktest(
   candles: Candle[],
   btcCandles: Candle[] | null,
   mode: BacktestMode = "any",
+  timeframe: BacktestTimeframe = "1d",
 ): BacktestResult {
-  return simulate(candles, (window) => {
-    const i = window.length - 1;
-    const lastClose = window[i].close;
+  return simulate(
+    candles,
+    (window) => {
+      const i = window.length - 1;
+      const lastClose = window[i].close;
 
-    const rsiSeries = calcRSI(window);
-    const bbSeries = calcBollingerBands(window);
-    const lastBb = bbSeries[bbSeries.length - 1];
+      const rsiSeries = calcRSI(window);
+      const bbSeries = calcBollingerBands(window);
+      const lastBb = bbSeries[bbSeries.length - 1];
 
-    const rsi = rsiSeries.length > 0 ? rsiSeries[rsiSeries.length - 1].value : null;
-    const bbPosition = lastBb ? bbSignal(lastClose, lastBb) : null;
-    const macd = macdSignal(calcMACD(window));
-    const volumeSpike = isVolumeSpike(window);
-    const trend = trendSignal(window);
+      const rsi = rsiSeries.length > 0 ? rsiSeries[rsiSeries.length - 1].value : null;
+      const bbPosition = lastBb ? bbSignal(lastClose, lastBb) : null;
+      const macd = macdSignal(calcMACD(window));
+      const volumeSpike = isVolumeSpike(window);
+      const trend = trendSignal(window);
 
-    let relativeStrength: ReturnType<typeof relativeStrengthSignal> = "inline";
-    if (btcCandles && btcCandles.length > i) {
-      const tokenWindow = window.slice(-RELATIVE_STRENGTH_WINDOW);
-      const btcWindow = btcCandles.slice(0, i + 1).slice(-RELATIVE_STRENGTH_WINDOW);
-      if (tokenWindow.length >= 2 && btcWindow.length >= 2) {
-        relativeStrength = relativeStrengthSignal(tokenWindow, btcWindow);
+      let relativeStrength: ReturnType<typeof relativeStrengthSignal> = "inline";
+      if (btcCandles && btcCandles.length > i) {
+        const tokenWindow = window.slice(-RELATIVE_STRENGTH_WINDOW);
+        const btcWindow = btcCandles.slice(0, i + 1).slice(-RELATIVE_STRENGTH_WINDOW);
+        if (tokenWindow.length >= 2 && btcWindow.length >= 2) {
+          relativeStrength = relativeStrengthSignal(tokenWindow, btcWindow);
+        }
       }
-    }
 
-    const { level } = computeOpportunityScore({ rsi, macd, bbPosition, volumeSpike, trend, relativeStrength });
-    const isBuySignal = mode === "strongOnly" ? level === "strongBuy" : level === "buy" || level === "strongBuy";
-    const isSellSignal = mode === "strongOnly" ? level === "strongSell" : level === "sell" || level === "strongSell";
+      const { level } = computeOpportunityScore({ rsi, macd, bbPosition, volumeSpike, trend, relativeStrength });
+      const isBuySignal = mode === "strongOnly" ? level === "strongBuy" : level === "buy" || level === "strongBuy";
+      const isSellSignal = mode === "strongOnly" ? level === "strongSell" : level === "sell" || level === "strongSell";
 
-    if (isBuySignal) return "buy";
-    if (isSellSignal) return "sell";
-    return "hold";
-  });
+      if (isBuySignal) return "buy";
+      if (isSellSignal) return "sell";
+      return "hold";
+    },
+    timeframe,
+  );
 }
 
 const RSI_OVERSOLD = 30;
@@ -350,13 +371,21 @@ const RSI_OVERBOUGHT = 70;
  * (MACD, Bollinger, trend, relative strength) aren't earning their
  * complexity.
  */
-export function runRsiOnlyBacktest(candles: Candle[], rsiPeriod: number): BacktestResult {
-  return simulate(candles, (window) => {
-    const rsiSeries = calcRSI(window, rsiPeriod);
-    if (rsiSeries.length === 0) return "hold";
-    const rsi = rsiSeries[rsiSeries.length - 1].value;
-    if (rsi <= RSI_OVERSOLD) return "buy";
-    if (rsi >= RSI_OVERBOUGHT) return "sell";
-    return "hold";
-  });
+export function runRsiOnlyBacktest(
+  candles: Candle[],
+  rsiPeriod: number,
+  timeframe: BacktestTimeframe = "1d",
+): BacktestResult {
+  return simulate(
+    candles,
+    (window) => {
+      const rsiSeries = calcRSI(window, rsiPeriod);
+      if (rsiSeries.length === 0) return "hold";
+      const rsi = rsiSeries[rsiSeries.length - 1].value;
+      if (rsi <= RSI_OVERSOLD) return "buy";
+      if (rsi >= RSI_OVERBOUGHT) return "sell";
+      return "hold";
+    },
+    timeframe,
+  );
 }

@@ -4,7 +4,13 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { ListChecks } from "lucide-react";
 import type { MarketToken } from "../types";
 import type { Currency } from "../lib/currency";
-import { POSITION_SIZE_PCT, type BacktestMode, type BacktestResult, type ExitReason } from "../lib/backtest";
+import {
+  POSITION_SIZE_PCT,
+  type BacktestMode,
+  type BacktestResult,
+  type BacktestTimeframe,
+  type ExitReason,
+} from "../lib/backtest";
 import { BACKTEST_WINDOW_OPTIONS } from "../lib/backtestData";
 import { useBacktestAll, type BacktestSummary } from "../hooks/useBacktestAll";
 import { useRsiBacktestAll, type RsiBacktestSummary } from "../hooks/useRsiBacktestAll";
@@ -61,6 +67,22 @@ function dateRangeLabel(result: BacktestResult): string | null {
   return `${fmt(first)} a ${fmt(last)} (${days} dias)`;
 }
 
+/** Daily candles only need a date; 1h/4h candles can carry several trades
+ * per day, so those get the time of day too, or entries/exits on the same
+ * day would look identical. */
+function formatCandleTime(t: number, timeframe: BacktestTimeframe): string {
+  const date = new Date(t * 1000);
+  return timeframe === "1d"
+    ? date.toLocaleDateString("pt-BR")
+    : date.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+const TIMEFRAME_OPTIONS: { label: string; value: BacktestTimeframe }[] = [
+  { label: "1 hora", value: "1h" },
+  { label: "4 horas", value: "4h" },
+  { label: "1 dia", value: "1d" },
+];
+
 interface SelectedDetail {
   source: "score" | "rsi";
   sourceLabel: string;
@@ -68,6 +90,7 @@ interface SelectedDetail {
   symbol: string;
   result: BacktestResult;
   isDemo: boolean;
+  timeframe: BacktestTimeframe;
 }
 
 /** The three ways to trade the backtest: the score's normal Compra/Venda
@@ -215,18 +238,31 @@ function ComparisonTable<T extends { tokenId: string; symbol: string; result: Ba
 export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) {
   const [strategy, setStrategy] = useState<Strategy>("any");
   const [rsiPeriod, setRsiPeriod] = useState(14);
-  // Index into BACKTEST_WINDOW_OPTIONS, kept as a string since that's what
-  // <select> values are — defaults to "Máximo disponível" (last option).
-  const [windowIndex, setWindowIndex] = useState(String(BACKTEST_WINDOW_OPTIONS.length - 1));
-  const windowDays = BACKTEST_WINDOW_OPTIONS[Number(windowIndex)]?.days;
+  const [timeframe, setTimeframe] = useState<BacktestTimeframe>("1d");
+  const windowOptions = BACKTEST_WINDOW_OPTIONS[timeframe];
+  // Index into windowOptions, kept as a string since that's what <select>
+  // values are — defaults to "Máximo disponível" (last option).
+  const [windowIndex, setWindowIndex] = useState(String(windowOptions.length - 1));
+  const windowDays = windowOptions[Number(windowIndex)]?.days;
+
+  function handleTimeframeChange(next: BacktestTimeframe) {
+    setTimeframe(next);
+    // Each timeframe has its own window option list (finer candles have a
+    // much shorter real data ceiling) — reset to that list's own "Máximo
+    // disponível" instead of keeping an index that may not even exist there.
+    setWindowIndex(String(BACKTEST_WINDOW_OPTIONS[next].length - 1));
+  }
 
   const scoreBatch = useBacktestAll();
   const rsiBatch = useRsiBacktestAll();
   const [selected, setSelected] = useState<SelectedDetail | null>(null);
-  // What was actually run last (may lag behind the `strategy` select if the
-  // user changes it without clicking "Rodar" again) — drives which batch's
-  // results the comparison table/detail section below show.
-  const [lastRun, setLastRun] = useState<{ source: "score" | "rsi"; label: string } | null>(null);
+  // What was actually run last (may lag behind the `strategy`/`timeframe`
+  // selects if the user changes them without clicking "Rodar" again) —
+  // drives which batch's results the comparison table/detail section below
+  // show.
+  const [lastRun, setLastRun] = useState<{ source: "score" | "rsi"; label: string; timeframe: BacktestTimeframe } | null>(
+    null,
+  );
 
   const running = strategy === "rsi" ? rsiBatch.running : scoreBatch.running;
   const activeBatch = lastRun?.source === "rsi" ? rsiBatch : scoreBatch;
@@ -235,12 +271,12 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
     if (tokens.length === 0) return;
     setSelected(null);
     if (strategy === "rsi") {
-      rsiBatch.runAll(tokens, rsiPeriod, apiKey, windowDays);
-      setLastRun({ source: "rsi", label: `RSI(${rsiPeriod})` });
+      rsiBatch.runAll(tokens, rsiPeriod, apiKey, windowDays, timeframe);
+      setLastRun({ source: "rsi", label: `RSI(${rsiPeriod})`, timeframe });
     } else {
       const strategyLabel = STRATEGY_OPTIONS.find((opt) => opt.value === strategy)?.label ?? "Score";
-      scoreBatch.runAll(tokens, apiKey, strategy as BacktestMode, windowDays);
-      setLastRun({ source: "score", label: strategyLabel });
+      scoreBatch.runAll(tokens, apiKey, strategy as BacktestMode, windowDays, timeframe);
+      setLastRun({ source: "score", label: strategyLabel, timeframe });
     }
   }
 
@@ -253,6 +289,7 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
       symbol: s.symbol,
       result: s.result,
       isDemo: s.isDemo,
+      timeframe: lastRun.timeframe,
     });
   }
 
@@ -260,22 +297,26 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
     <div className="flex flex-col gap-4">
       <Card title="Backtest">
         <p className="mb-3 text-xs leading-relaxed text-[var(--color-text-dim)]">
-          Simula uma regra de swing trade pra toda a sua watchlist de uma vez, operando comprado
-          (long) E vendido (short): abre ou vira comprado no primeiro dia em que o sinal
-          escolhido abaixo aponta compra, abre ou vira vendido no primeiro dia em que aponta
+          Simula uma regra de swing/day trade pra toda a sua watchlist de uma vez, operando
+          comprado (long) E vendido (short): abre ou vira comprado na primeira vela em que o
+          sinal escolhido abaixo aponta compra, abre ou vira vendido na primeira em que aponta
           venda — ou seja, também pode lucrar com o mercado caindo, não só subindo. Escolha o
           sinal: Compra Forte/Venda Forte e Compra/Venda usam o score completo (RSI + MACD +
           Bollinger + tendência + força relativa) em faixas mais ou menos exigentes; RSI puro
           usa só o RSI (≤30 compra, ≥70 vende), sem os outros indicadores — útil pra comparar
-          se eles realmente ajudam ou só atrapalham. Cada entrada já sai com stop-loss e
-          take-profit calculados a partir do suporte/resistência recente (mínima/máxima das
-          últimas 20 velas), e só {POSITION_SIZE_PCT}% do capital fica alocado por trade — o
-          resto fica de fora, então um trade ruim nunca zera a conta sozinho. Usa só o timeframe
-          diário — não a confluência completa de 5 timeframes do app — e não modela taxas nem
-          slippage. Buy & hold aparece como referência de contexto, não como meta: o que importa
-          aqui é o retorno absoluto da estratégia. Trate como um teste de direção do sinal, não
-          uma réplica exata do score ao vivo, e lembre que desempenho passado não garante
-          resultado futuro.
+          se eles realmente ajudam ou só atrapalham. Escolha também o timeframe: 1h/4h pra
+          horizontes mais curtos (poucos dias), 1d pro swing trade clássico (dias a semanas) —
+          quanto menor a vela, menos histórico real dá pra buscar (a Binance limita a 1000
+          velas por consulta: ~41 dias em 1h, ~166 dias em 4h, ~2,7 anos em 1d), e o stop/alvo
+          são recalibrados pra cada um. Cada entrada já sai com stop-loss e take-profit
+          calculados a partir do suporte/resistência recente (mínima/máxima das últimas 20
+          velas), e só {POSITION_SIZE_PCT}% do capital fica alocado por trade — o resto fica de
+          fora, então um trade ruim nunca zera a conta sozinho. Usa só um timeframe por vez —
+          não a confluência completa de 5 timeframes do app — e não modela taxas nem slippage.
+          Buy & hold aparece como referência de contexto, não como meta: o que importa aqui é o
+          retorno absoluto da estratégia. Trate como um teste de direção do sinal, não uma
+          réplica exata do score ao vivo, e lembre que desempenho passado não garante resultado
+          futuro.
         </p>
 
         {tokens.length === 0 ? (
@@ -310,11 +351,22 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                 </select>
               )}
               <select
+                value={timeframe}
+                onChange={(e) => handleTimeframeChange(e.target.value as BacktestTimeframe)}
+                className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+              >
+                {TIMEFRAME_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <select
                 value={windowIndex}
                 onChange={(e) => setWindowIndex(e.target.value)}
                 className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
               >
-                {BACKTEST_WINDOW_OPTIONS.map((opt, i) => (
+                {windowOptions.map((opt, i) => (
                   <option key={opt.label} value={i}>
                     Janela: {opt.label}
                   </option>
@@ -412,10 +464,14 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                   <XAxis
                     dataKey="time"
                     tickFormatter={(v) =>
-                      new Date(Number(v) * 1000).toLocaleDateString("pt-BR", {
-                        month: "short",
-                        day: "2-digit",
-                      })
+                      selected.timeframe === "1d"
+                        ? new Date(Number(v) * 1000).toLocaleDateString("pt-BR", { month: "short", day: "2-digit" })
+                        : new Date(Number(v) * 1000).toLocaleString("pt-BR", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
                     }
                     tick={{ fontSize: 11 }}
                   />
@@ -427,7 +483,7 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                       borderRadius: 8,
                       fontSize: 12,
                     }}
-                    labelFormatter={(v) => new Date(Number(v) * 1000).toLocaleDateString("pt-BR")}
+                    labelFormatter={(v) => formatCandleTime(Number(v), selected.timeframe)}
                     formatter={(v, name) => [
                       Number(v).toFixed(1),
                       name === "equity" ? "Estratégia" : "Buy & Hold",
@@ -488,12 +544,8 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                             {t.type === "long" ? "Long" : "Short"}
                           </span>
                         </td>
-                        <td className="py-1.5 pr-3">
-                          {new Date(t.entryTime * 1000).toLocaleDateString("pt-BR")}
-                        </td>
-                        <td className="py-1.5 pr-3">
-                          {new Date(t.exitTime * 1000).toLocaleDateString("pt-BR")}
-                        </td>
+                        <td className="py-1.5 pr-3">{formatCandleTime(t.entryTime, selected.timeframe)}</td>
+                        <td className="py-1.5 pr-3">{formatCandleTime(t.exitTime, selected.timeframe)}</td>
                         <td className="num-mono py-1.5 pr-3">{formatPrice(t.entryPrice, currency)}</td>
                         <td className="num-mono py-1.5 pr-3">{formatPrice(t.exitPrice, currency)}</td>
                         <td className="py-1.5 pr-3 text-[var(--color-text-dim)]">

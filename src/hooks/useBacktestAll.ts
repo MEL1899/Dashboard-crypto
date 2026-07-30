@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { mockCandles } from "../lib/mock";
-import { runBacktest, type BacktestMode, type BacktestResult } from "../lib/backtest";
-import { BTC_TOKEN_ID, fetchDailyCandles } from "../lib/backtestData";
+import { runBacktest, type BacktestMode, type BacktestResult, type BacktestTimeframe } from "../lib/backtest";
+import { BTC_TOKEN_ID, fetchBacktestCandles } from "../lib/backtestData";
 import type { MarketToken } from "../types";
 
 export interface BacktestSummary {
@@ -34,14 +34,15 @@ export function useBacktestAll() {
     apiKey?: string,
     mode: BacktestMode = "any",
     windowDays?: number,
+    timeframe: BacktestTimeframe = "1d",
   ) {
     setState({ running: true, progress: { done: 0, total: tokens.length }, summaries: [] });
 
     let btcCandles;
     try {
-      btcCandles = await fetchDailyCandles(BTC_TOKEN_ID, apiKey, windowDays);
+      btcCandles = await fetchBacktestCandles(BTC_TOKEN_ID, timeframe, apiKey, windowDays);
     } catch {
-      btcCandles = mockCandles(BTC_TOKEN_ID, "1d");
+      btcCandles = mockCandles(BTC_TOKEN_ID, timeframe);
     }
 
     const summaries: BacktestSummary[] = [];
@@ -49,12 +50,13 @@ export function useBacktestAll() {
       let candles;
       let isDemo = false;
       try {
-        candles = token.id === BTC_TOKEN_ID ? btcCandles : await fetchDailyCandles(token.id, apiKey, windowDays);
+        candles =
+          token.id === BTC_TOKEN_ID ? btcCandles : await fetchBacktestCandles(token.id, timeframe, apiKey, windowDays);
       } catch {
-        candles = mockCandles(token.id, "1d");
+        candles = mockCandles(token.id, timeframe);
         isDemo = true;
       }
-      const result = runBacktest(candles, token.id === BTC_TOKEN_ID ? null : btcCandles, mode);
+      const result = runBacktest(candles, token.id === BTC_TOKEN_ID ? null : btcCandles, mode, timeframe);
       summaries.push({ tokenId: token.id, symbol: token.symbol, result, isDemo });
       setState((s) => ({ ...s, progress: { done: summaries.length, total: tokens.length }, summaries: [...summaries] }));
     }

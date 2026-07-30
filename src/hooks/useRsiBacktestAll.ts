@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { mockCandles } from "../lib/mock";
-import { runRsiOnlyBacktest, type BacktestResult } from "../lib/backtest";
-import { fetchDailyCandles } from "../lib/backtestData";
+import { runRsiOnlyBacktest, type BacktestResult, type BacktestTimeframe } from "../lib/backtest";
+import { fetchBacktestCandles } from "../lib/backtestData";
 import type { MarketToken } from "../types";
 
 export interface RsiBacktestSummary {
@@ -28,7 +28,13 @@ const IDLE_STATE: BatchState = { running: false, progress: { done: 0, total: 0 }
 export function useRsiBacktestAll() {
   const [state, setState] = useState<BatchState>(IDLE_STATE);
 
-  async function runAll(tokens: MarketToken[], rsiPeriod: number, apiKey?: string, windowDays?: number) {
+  async function runAll(
+    tokens: MarketToken[],
+    rsiPeriod: number,
+    apiKey?: string,
+    windowDays?: number,
+    timeframe: BacktestTimeframe = "1d",
+  ) {
     setState({ running: true, progress: { done: 0, total: tokens.length }, summaries: [] });
 
     const summaries: RsiBacktestSummary[] = [];
@@ -36,12 +42,12 @@ export function useRsiBacktestAll() {
       let candles;
       let isDemo = false;
       try {
-        candles = await fetchDailyCandles(token.id, apiKey, windowDays);
+        candles = await fetchBacktestCandles(token.id, timeframe, apiKey, windowDays);
       } catch {
-        candles = mockCandles(token.id, "1d");
+        candles = mockCandles(token.id, timeframe);
         isDemo = true;
       }
-      const result = runRsiOnlyBacktest(candles, rsiPeriod);
+      const result = runRsiOnlyBacktest(candles, rsiPeriod, timeframe);
       summaries.push({ tokenId: token.id, symbol: token.symbol, result, isDemo });
       setState((s) => ({ ...s, progress: { done: summaries.length, total: tokens.length }, summaries: [...summaries] }));
     }

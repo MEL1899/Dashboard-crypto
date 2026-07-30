@@ -157,6 +157,32 @@ describe("runBacktest", () => {
       expect(["stop", "target", "signal", "end"]).toContain(trade.exitReason);
     }
   });
+
+  it("stop-loss distance is tighter on shorter timeframes than on 1d", () => {
+    const candles = makeCandles(syntheticSeries(200));
+    const daily = runBacktest(candles, null, "any", "1d");
+    const fourHour = runBacktest(candles, null, "any", "4h");
+    const hourly = runBacktest(candles, null, "any", "1h");
+    // These bounds mirror STOP_BOUNDS_PCT in backtest.ts — a stop-triggered
+    // trade's |returnPct| should never exceed its timeframe's max, since
+    // the stop always fires at exactly the clamped stop price.
+    for (const trade of daily.trades) {
+      if (trade.exitReason === "stop") expect(Math.abs(trade.returnPct)).toBeLessThanOrEqual(15 + 1e-6);
+    }
+    for (const trade of fourHour.trades) {
+      if (trade.exitReason === "stop") expect(Math.abs(trade.returnPct)).toBeLessThanOrEqual(7 + 1e-6);
+    }
+    for (const trade of hourly.trades) {
+      if (trade.exitReason === "stop") expect(Math.abs(trade.returnPct)).toBeLessThanOrEqual(3.5 + 1e-6);
+    }
+  });
+
+  it("defaults to the 1d timeframe when none is passed, unchanged from before", () => {
+    const candles = makeCandles(syntheticSeries(150));
+    const withDefault = runBacktest(candles, null);
+    const explicit1d = runBacktest(candles, null, "any", "1d");
+    expect(withDefault).toEqual(explicit1d);
+  });
 });
 
 describe("runRsiOnlyBacktest", () => {
@@ -207,5 +233,24 @@ describe("runRsiOnlyBacktest", () => {
     const fast = runRsiOnlyBacktest(candles, 7);
     const slow = runRsiOnlyBacktest(candles, 21);
     expect(fast.trades.length).toBeGreaterThanOrEqual(slow.trades.length);
+  });
+
+  it("stop-loss distance is tighter on shorter timeframes than on 1d", () => {
+    const candles = makeCandles(syntheticSeries(200));
+    const daily = runRsiOnlyBacktest(candles, 14, "1d");
+    const hourly = runRsiOnlyBacktest(candles, 14, "1h");
+    for (const trade of daily.trades) {
+      if (trade.exitReason === "stop") expect(Math.abs(trade.returnPct)).toBeLessThanOrEqual(15 + 1e-6);
+    }
+    for (const trade of hourly.trades) {
+      if (trade.exitReason === "stop") expect(Math.abs(trade.returnPct)).toBeLessThanOrEqual(3.5 + 1e-6);
+    }
+  });
+
+  it("defaults to the 1d timeframe when none is passed, unchanged from before", () => {
+    const candles = makeCandles(syntheticSeries(150));
+    const withDefault = runRsiOnlyBacktest(candles, 14);
+    const explicit1d = runRsiOnlyBacktest(candles, 14, "1d");
+    expect(withDefault).toEqual(explicit1d);
   });
 });
