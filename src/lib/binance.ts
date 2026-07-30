@@ -62,12 +62,19 @@ const TIMEFRAME_LIMIT: Record<Timeframe, number> = {
 // [openTime, open, high, low, close, volume, closeTime, ...]
 type KlineRow = [number, string, string, string, string, string, ...unknown[]];
 
-/** Real native candles at the exact requested granularity — no client-side bucketing needed. */
-export async function fetchKlines(symbol: string, timeframe: Timeframe): Promise<Candle[]> {
+/** Real native candles at the exact requested granularity — no client-side
+ * bucketing needed. `limitOverride` lets a caller ask for more history than
+ * the live chart needs (e.g. the backtest tab) — Binance allows up to 1000
+ * candles per request regardless of interval. */
+export async function fetchKlines(
+  symbol: string,
+  timeframe: Timeframe,
+  limitOverride?: number,
+): Promise<Candle[]> {
   const url = new URL(`${BASE}/api/v3/klines`);
   url.searchParams.set("symbol", symbol);
   url.searchParams.set("interval", timeframe);
-  url.searchParams.set("limit", String(TIMEFRAME_LIMIT[timeframe]));
+  url.searchParams.set("limit", String(limitOverride ?? TIMEFRAME_LIMIT[timeframe]));
 
   const rows = await getJson<KlineRow[]>(url);
   return rows.map((r) => ({

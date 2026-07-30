@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { mockCandles } from "../lib/mock";
-import { runBacktest, type BacktestResult } from "../lib/backtest";
+import { runBacktest, type BacktestMode, type BacktestResult } from "../lib/backtest";
 import { BTC_TOKEN_ID, fetchDailyCandles } from "../lib/backtestData";
 import type { MarketToken } from "../types";
 
@@ -29,7 +29,7 @@ const IDLE_STATE: BatchState = { running: false, progress: { done: 0, total: 0 }
 export function useBacktestAll() {
   const [state, setState] = useState<BatchState>(IDLE_STATE);
 
-  async function runAll(tokens: MarketToken[], apiKey?: string) {
+  async function runAll(tokens: MarketToken[], apiKey?: string, mode: BacktestMode = "any") {
     setState({ running: true, progress: { done: 0, total: tokens.length }, summaries: [] });
 
     let btcCandles;
@@ -49,7 +49,7 @@ export function useBacktestAll() {
         candles = mockCandles(token.id, "1d");
         isDemo = true;
       }
-      const result = runBacktest(candles, token.id === BTC_TOKEN_ID ? null : btcCandles);
+      const result = runBacktest(candles, token.id === BTC_TOKEN_ID ? null : btcCandles, mode);
       summaries.push({ tokenId: token.id, symbol: token.symbol, result, isDemo });
       setState((s) => ({ ...s, progress: { done: summaries.length, total: tokens.length }, summaries: [...summaries] }));
     }

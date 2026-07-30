@@ -1,11 +1,13 @@
 import { useMemo, useState } from "react";
 import clsx from "clsx";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ListChecks, Play } from "lucide-react";
+import { Activity, ListChecks, Play } from "lucide-react";
 import type { MarketToken } from "../types";
 import type { Currency } from "../lib/currency";
+import type { BacktestMode } from "../lib/backtest";
 import { useBacktest } from "../hooks/useBacktest";
 import { useBacktestAll } from "../hooks/useBacktestAll";
+import { useRsiBacktest } from "../hooks/useRsiBacktest";
 import { Card, Spinner, formatPrice } from "./common";
 
 interface BacktestPanelProps {
@@ -40,24 +42,36 @@ function StatTile({
   );
 }
 
+const MODE_OPTIONS: { label: string; value: BacktestMode }[] = [
+  { label: "Compra/Venda (score ≥60 / ≤40)", value: "any" },
+  { label: "Só Compra Forte/Venda Forte (score ≥80 / ≤20)", value: "strongOnly" },
+];
+
 export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) {
   const [tokenId, setTokenId] = useState(tokens[0]?.id ?? "");
+  const [mode, setMode] = useState<BacktestMode>("any");
   const backtest = useBacktest();
   const batch = useBacktestAll();
+  const rsiBacktest = useRsiBacktest();
 
   function handleRun() {
     if (!tokenId) return;
-    backtest.run(tokenId, apiKey);
+    backtest.run(tokenId, apiKey, mode);
   }
 
   function handleRunAll() {
     if (tokens.length === 0) return;
-    batch.runAll(tokens, apiKey);
+    batch.runAll(tokens, apiKey, mode);
   }
 
   function handleSelectFromSummary(id: string) {
     setTokenId(id);
-    backtest.run(id, apiKey);
+    backtest.run(id, apiKey, mode);
+  }
+
+  function handleRunRsi() {
+    if (!tokenId) return;
+    rsiBacktest.run(tokenId, apiKey);
   }
 
   // Ranked by how much the score's timing beat (or lagged) just holding —
@@ -79,12 +93,14 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
       <Card title="Backtest — Score de Oportunidade">
         <p className="mb-3 text-xs leading-relaxed text-[var(--color-text-dim)]">
           Simula o score como uma regra simples de swing trade: compra no primeiro dia em que
-          o score lê Compra/Compra Forte estando de fora, vende no primeiro dia em que lê
-          Venda/Venda Forte estando posicionado. Usa só o timeframe diário — não a confluência
-          completa de 5 timeframes do app, que exigiria histórico intradiário mais profundo do
-          que as APIs gratuitas oferecem. Trate como um teste de direção do sinal, não uma
-          réplica exata do score ao vivo, e lembre que desempenho passado não garante resultado
-          futuro.
+          o score entra na faixa escolhida abaixo estando de fora, vende no primeiro dia em que
+          entra na faixa de venda correspondente estando posicionado. Usa até ~2,7 anos de
+          candles diários (via Binance) ou 1 ano (via CoinGecko, teto do plano gratuito) — mais
+          histórico do que a janela de 6 meses de antes, pra dar uma amostra de trades mais
+          confiável. Usa só o timeframe diário — não a confluência completa de 5 timeframes do
+          app, que exigiria histórico intradiário mais profundo do que as APIs gratuitas
+          oferecem. Trate como um teste de direção do sinal, não uma réplica exata do score ao
+          vivo, e lembre que desempenho passado não garante resultado futuro.
         </p>
 
         {tokens.length === 0 ? (
@@ -105,6 +121,17 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                   </option>
                 ))}
               </select>
+              <select
+                value={mode}
+                onChange={(e) => setMode(e.target.value as BacktestMode)}
+                className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+              >
+                {MODE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
               <button
                 onClick={handleRun}
                 disabled={backtest.loading}
@@ -120,6 +147,14 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
               >
                 {batch.running ? <Spinner /> : <ListChecks size={14} />}
                 Rodar para toda a watchlist ({tokens.length})
+              </button>
+              <button
+                onClick={handleRunRsi}
+                disabled={rsiBacktest.loading}
+                className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-text-dim)] hover:text-[var(--color-text)] disabled:opacity-60"
+              >
+                {rsiBacktest.loading ? <Spinner /> : <Activity size={14} />}
+                Comparar só RSI (7/14/21)
               </button>
             </div>
             {batch.running && (
@@ -166,6 +201,77 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                         {s.isDemo && (
                           <span className="ml-1 text-[10px] text-[var(--color-text-dim)]">(demo)</span>
                         )}
+                      </td>
+                      <td
+                        className={clsx(
+                          "num-mono py-1.5 pr-3",
+                          s.result.strategyReturnPct >= 0 ? "text-[var(--color-up)]" : "text-[var(--color-down)]",
+                        )}
+                      >
+                        {s.result.strategyReturnPct >= 0 ? "+" : ""}
+                        {s.result.strategyReturnPct.toFixed(1)}%
+                      </td>
+                      <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
+                        {s.result.buyHoldReturnPct >= 0 ? "+" : ""}
+                        {s.result.buyHoldReturnPct.toFixed(1)}%
+                      </td>
+                      <td
+                        className={clsx(
+                          "num-mono py-1.5 pr-3 font-medium",
+                          diff >= 0 ? "text-[var(--color-up)]" : "text-[var(--color-down)]",
+                        )}
+                      >
+                        {diff >= 0 ? "+" : ""}
+                        {diff.toFixed(1)}%
+                      </td>
+                      <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
+                        {s.result.trades.length}
+                      </td>
+                      <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
+                        {s.result.trades.length > 0 ? `${s.result.winRate.toFixed(0)}%` : "-"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {rsiBacktest.summaries.length > 0 && (
+        <Card title="RSI puro — comparação de períodos">
+          <p className="mb-2 text-xs leading-relaxed text-[var(--color-text-dim)]">
+            Estratégia bem mais simples que o score: compra quando o RSI cai a 30 ou menos,
+            vende quando sobe a 70 ou mais — sem MACD, Bollinger, tendência ou força relativa.
+            Serve de referência: se o score completo não bate claramente esse baseline, a
+            complexidade extra não está se pagando.
+          </p>
+          {rsiBacktest.isDemo && (
+            <p className="mb-2 text-xs text-[var(--color-text-dim)]">
+              Modo demonstração: não foi possível carregar histórico real agora
+              {rsiBacktest.error ? ` (${rsiBacktest.error})` : ""}. Exibindo candles simulados.
+            </p>
+          )}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="text-[var(--color-text-dim)]">
+                <tr>
+                  <th className="py-1.5 pr-3 font-medium">Período do RSI</th>
+                  <th className="py-1.5 pr-3 font-medium">Estratégia</th>
+                  <th className="py-1.5 pr-3 font-medium">Buy & Hold</th>
+                  <th className="py-1.5 pr-3 font-medium">Diferença</th>
+                  <th className="py-1.5 pr-3 font-medium">Trades</th>
+                  <th className="py-1.5 pr-3 font-medium">Acerto</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rsiBacktest.summaries.map((s) => {
+                  const diff = s.result.strategyReturnPct - s.result.buyHoldReturnPct;
+                  return (
+                    <tr key={s.period} className="border-t border-[var(--color-border)]">
+                      <td className="py-1.5 pr-3 font-medium text-[var(--color-text)]">
+                        RSI({s.period})
                       </td>
                       <td
                         className={clsx(

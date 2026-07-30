@@ -167,16 +167,20 @@ const TIMEFRAME_CONFIG: Record<Timeframe, { lookbackDays: number; bucketSeconds:
   "1M": { lookbackDays: 1825, bucketSeconds: 30 * 86400 },
 };
 
+/** `lookbackDaysOverride` lets a caller ask for more/less history than the
+ * live chart needs (e.g. the backtest tab). CoinGecko's free/demo tier caps
+ * historical daily data at 365 days regardless of what's requested. */
 export async function fetchCandlesForTimeframe(
   tokenId: string,
   timeframe: Timeframe,
   apiKey?: string,
+  lookbackDaysOverride?: number,
 ): Promise<Candle[]> {
   const { lookbackDays, bucketSeconds } = TIMEFRAME_CONFIG[timeframe];
 
   const chartUrl = withKey(new URL(`${BASE}/coins/${tokenId}/market_chart`), apiKey);
   chartUrl.searchParams.set("vs_currency", "usd");
-  chartUrl.searchParams.set("days", String(lookbackDays));
+  chartUrl.searchParams.set("days", String(lookbackDaysOverride ?? lookbackDays));
 
   const chart = await getJson<{ prices: ChartSeries; total_volumes: ChartSeries }>(chartUrl);
   return bucketToCandles(chart.prices ?? [], chart.total_volumes ?? [], bucketSeconds);

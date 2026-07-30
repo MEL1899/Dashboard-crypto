@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { mockCandles } from "../lib/mock";
-import { runBacktest, type BacktestResult } from "../lib/backtest";
+import { runBacktest, type BacktestMode, type BacktestResult } from "../lib/backtest";
 import { BTC_TOKEN_ID, fetchDailyCandles } from "../lib/backtestData";
 
 interface BacktestState {
@@ -20,14 +20,14 @@ const IDLE_STATE: BacktestState = { loading: false, error: null, isDemo: false, 
 export function useBacktest() {
   const [state, setState] = useState<BacktestState>(IDLE_STATE);
 
-  async function run(tokenId: string, apiKey?: string) {
+  async function run(tokenId: string, apiKey?: string, mode: BacktestMode = "any") {
     setState({ loading: true, error: null, isDemo: false, result: null });
     try {
       const [candles, btcCandles] = await Promise.all([
         fetchDailyCandles(tokenId, apiKey),
         tokenId === BTC_TOKEN_ID ? Promise.resolve(null) : fetchDailyCandles(BTC_TOKEN_ID, apiKey),
       ]);
-      setState({ loading: false, error: null, isDemo: false, result: runBacktest(candles, btcCandles) });
+      setState({ loading: false, error: null, isDemo: false, result: runBacktest(candles, btcCandles, mode) });
     } catch (err) {
       // Same resilience pattern as the rest of the app: fall back to the
       // deterministic mock so the feature still demonstrates itself
@@ -38,7 +38,7 @@ export function useBacktest() {
         loading: false,
         error: err instanceof Error ? err.message : "Failed to run backtest",
         isDemo: true,
-        result: runBacktest(candles, btcCandles),
+        result: runBacktest(candles, btcCandles, mode),
       });
     }
   }

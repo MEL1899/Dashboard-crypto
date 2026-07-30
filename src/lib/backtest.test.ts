@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runBacktest } from "./backtest";
+import { runBacktest, runRsiOnlyBacktest } from "./backtest";
 import type { Candle } from "../types";
 
 function makeCandles(closes: number[], startTime = 0, stepSeconds = 86400): Candle[] {
@@ -95,5 +95,62 @@ describe("runBacktest", () => {
     const result = runBacktest(candles, null);
     expect(result.maxDrawdownPct).toBeGreaterThanOrEqual(0);
     expect(result.maxDrawdownPct).toBeLessThan(100);
+  });
+
+  it("'strongOnly' mode trades no more often than the default 'any' mode", () => {
+    const candles = makeCandles(syntheticSeries(150));
+    const any = runBacktest(candles, null, "any");
+    const strongOnly = runBacktest(candles, null, "strongOnly");
+    // Compra Forte/Venda Forte is strictly harder to reach than
+    // Compra/Venda, so it can never open MORE trades than the looser rule.
+    expect(strongOnly.trades.length).toBeLessThanOrEqual(any.trades.length);
+  });
+});
+
+describe("runRsiOnlyBacktest", () => {
+  it("returns an empty result when there isn't enough history", () => {
+    const result = runRsiOnlyBacktest(makeCandles(Array(30).fill(100)), 14);
+    expect(result.trades).toEqual([]);
+    expect(result.equityCurve).toEqual([]);
+  });
+
+  it("builds one equity point per post-warmup candle", () => {
+    const candles = makeCandles(syntheticSeries(150));
+    const result = runRsiOnlyBacktest(candles, 7);
+    expect(result.equityCurve.length).toBe(candles.length - 50);
+  });
+
+  it("each trade's return% matches (exit - entry) / entry, for every RSI period", () => {
+    const candles = makeCandles(syntheticSeries(150));
+    for (const period of [7, 14, 21]) {
+      const result = runRsiOnlyBacktest(candles, period);
+      for (const trade of result.trades) {
+        const expected = ((trade.exitPrice - trade.entryPrice) / trade.entryPrice) * 100;
+        expect(trade.returnPct).toBeCloseTo(expected, 6);
+      }
+    }
+  });
+
+  it("never looks ahead, same as the score-based backtest", () => {
+    const candles = makeCandles(syntheticSeries(150));
+    const truncated = candles.slice(0, 100);
+
+    const full = runRsiOnlyBacktest(candles, 7);
+    const partial = runRsiOnlyBacktest(truncated, 7);
+
+    const truncatedEndTime = truncated[truncated.length - 1].time;
+    const fullEntriesWithinWindow = full.trades
+      .map((t) => t.entryTime)
+      .filter((t) => t <= truncatedEndTime);
+    const partialEntries = partial.trades.map((t) => t.entryTime);
+
+    expect(partialEntries).toEqual(fullEntriesWithinWindow);
+  });
+
+  it("a faster (shorter-period) RSI swings to its thresholds more often than a slower one", () => {
+    const candles = makeCandles(syntheticSeries(150));
+    const fast = runRsiOnlyBacktest(candles, 7);
+    const slow = runRsiOnlyBacktest(candles, 21);
+    expect(fast.trades.length).toBeGreaterThanOrEqual(slow.trades.length);
   });
 });
