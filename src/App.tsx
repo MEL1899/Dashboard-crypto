@@ -57,6 +57,7 @@ function App() {
   const [tab, setTab] = useState<Tab>("market");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [watchlist, setWatchlist] = useState<string[]>(settings.watchlist);
+  const [portfolio, setPortfolio] = useState<string[]>(settings.portfolio);
   const [tokenId, setTokenId] = useState<string | null>(settings.selectedTokenId || null);
   const [timeframe, setTimeframe] = useState<Timeframe>(settings.timeframe);
   const [walletQuery, setWalletQuery] = useState<{ address: string; chain: ChainKey }>({
@@ -105,7 +106,23 @@ function App() {
     // Removing the token whose chart is open just closes the chart.
     const nextTokenId = tokenId === id ? null : tokenId;
     setTokenId(nextTokenId);
-    persist({ ...settings, watchlist: nextWatchlist, selectedTokenId: nextTokenId ?? "" });
+    // A token no longer on the watchlist can't stay flagged as portfolio.
+    const nextPortfolio = portfolio.filter((p) => p !== id);
+    setPortfolio(nextPortfolio);
+    persist({
+      ...settings,
+      watchlist: nextWatchlist,
+      portfolio: nextPortfolio,
+      selectedTokenId: nextTokenId ?? "",
+    });
+  }
+
+  function handleTogglePortfolio(id: string) {
+    const nextPortfolio = portfolio.includes(id)
+      ? portfolio.filter((p) => p !== id)
+      : [...portfolio, id];
+    setPortfolio(nextPortfolio);
+    persist({ ...settings, portfolio: nextPortfolio });
   }
 
   function handleTokenSelect(id: string) {
@@ -208,6 +225,8 @@ function App() {
                   onSelect={handleTokenSelect}
                   currency={MERCADO_CURRENCY}
                   signalsByToken={signalsByToken}
+                  portfolioIds={portfolio}
+                  onTogglePortfolio={handleTogglePortfolio}
                 />
 
                 {tokenId && (

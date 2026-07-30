@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import clsx from "clsx";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp, Star } from "lucide-react";
 import type { MarketToken } from "../types";
 import type { Currency } from "../lib/currency";
 import type { TokenSignals } from "../hooks/useWatchlistSignals";
@@ -44,6 +44,27 @@ function RsiPill({ value }: { value: number }) {
   );
 }
 
+function PortfolioStar({ active, onToggle }: { active: boolean; onToggle: () => void }) {
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      aria-label={active ? "Remover do portfólio" : "Marcar como parte do portfólio"}
+      aria-pressed={active}
+      className={clsx(
+        "mr-1.5 inline-flex shrink-0 items-center justify-center",
+        active
+          ? "text-[var(--color-accent)]"
+          : "text-[var(--color-text-dim)] hover:text-[var(--color-text)]",
+      )}
+    >
+      <Star size={13} fill={active ? "currentColor" : "none"} />
+    </button>
+  );
+}
+
 const NEUTRAL_TIMEFRAME_SIGNAL = {
   rsi: 50,
   macd: "neutral",
@@ -64,55 +85,37 @@ const FALLBACK_SIGNALS: TokenSignals = {
   isDemo: true,
 };
 
-interface MarketWatchlistProps {
+interface WatchlistTableProps {
   tokens: MarketToken[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   currency: Currency;
-  /** Real multi-timeframe confluence score + per-timeframe RSI per token
-   * (see useWatchlistSignals) — the same score shows here and in the
-   * detail panel below, regardless of the chart's active timeframe. */
   signalsByToken: Record<string, TokenSignals>;
+  portfolioIds: Set<string>;
+  onTogglePortfolio: (id: string) => void;
+  sortKey: SortKey;
+  sortDir: "asc" | "desc";
+  onSort: (key: SortKey) => void;
 }
 
-export function MarketWatchlist({
+/** Renders the desktop table + mobile card list for one group of tokens
+ * (either the portfolio section or the rest of the watchlist) — extracted
+ * so both groups share the exact same columns/layout instead of duplicating
+ * the markup. */
+function WatchlistTable({
   tokens,
   selectedId,
   onSelect,
   currency,
   signalsByToken,
-}: MarketWatchlistProps) {
-  const [sortKey, setSortKey] = useState<SortKey>("marketCap");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-
-  const sorted = useMemo(() => {
-    const copy = [...tokens];
-    copy.sort((a, b) => (a[sortKey] - b[sortKey]) * (sortDir === "asc" ? 1 : -1));
-    return copy;
-  }, [tokens, sortKey, sortDir]);
-
-  function handleSort(key: SortKey) {
-    if (key === sortKey) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir("desc");
-    }
-  }
-
-  const bigMovers = tokens.filter((t) => Math.abs(t.change24h) >= BIG_MOVE_THRESHOLD).length;
-
+  portfolioIds,
+  onTogglePortfolio,
+  sortKey,
+  sortDir,
+  onSort,
+}: WatchlistTableProps) {
   return (
-    <Card
-      title="Visão geral do mercado"
-      action={
-        bigMovers > 0 ? (
-          <Badge tone="accent">
-            {bigMovers} {bigMovers === 1 ? "ativo" : "ativos"} com variação forte
-          </Badge>
-        ) : undefined
-      }
-    >
+    <>
       {/* Desktop/tablet: full table. Mobile: stacked cards (below). */}
       <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[820px] text-left text-xs">
@@ -122,7 +125,7 @@ export function MarketWatchlist({
               {COLUMNS.map((col) => (
                 <th key={col.key} className="py-1.5 pr-2 font-medium">
                   <button
-                    onClick={() => handleSort(col.key)}
+                    onClick={() => onSort(col.key)}
                     className="flex items-center gap-1 hover:text-[var(--color-text)]"
                   >
                     {col.label}
@@ -140,7 +143,7 @@ export function MarketWatchlist({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((token) => {
+            {tokens.map((token) => {
               const isBigMove = Math.abs(token.change24h) >= BIG_MOVE_THRESHOLD;
               const signals = signalsByToken[token.id] ?? FALLBACK_SIGNALS;
               const rsi = {
@@ -160,8 +163,14 @@ export function MarketWatchlist({
                   )}
                 >
                   <td className="py-1.5 pr-2 font-medium text-[var(--color-text)]">
-                    {token.symbol}
-                    <span className="ml-1.5 text-[var(--color-text-dim)]">{token.name}</span>
+                    <span className="flex items-center">
+                      <PortfolioStar
+                        active={portfolioIds.has(token.id)}
+                        onToggle={() => onTogglePortfolio(token.id)}
+                      />
+                      {token.symbol}
+                      <span className="ml-1.5 text-[var(--color-text-dim)]">{token.name}</span>
+                    </span>
                   </td>
                   <td className="num-mono py-1.5 pr-2">{formatPrice(token.price, currency)}</td>
                   <td className="py-1.5 pr-2">
@@ -214,7 +223,7 @@ export function MarketWatchlist({
 
       {/* Mobile: one card per coin instead of a horizontally-scrolling table. */}
       <div className="flex flex-col gap-2 md:hidden">
-        {sorted.map((token) => {
+        {tokens.map((token) => {
           const isBigMove = Math.abs(token.change24h) >= BIG_MOVE_THRESHOLD;
           const signals = signalsByToken[token.id] ?? FALLBACK_SIGNALS;
           const rsi = {
@@ -225,18 +234,30 @@ export function MarketWatchlist({
             "1M": signals.byTimeframe["1M"].rsi,
           };
           return (
-            <button
+            // A <div role="button"> instead of a real <button> so the
+            // portfolio star below can be its own nested, independently
+            // clickable <button> (a <button> can't contain another one).
+            <div
               key={token.id}
+              role="button"
+              tabIndex={0}
               onClick={() => onSelect(token.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") onSelect(token.id);
+              }}
               className={clsx(
-                "flex flex-col gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                "flex cursor-pointer flex-col gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
                 token.id === selectedId
                   ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10"
                   : "border-[var(--color-border)] hover:bg-white/5",
               )}
             >
               <div className="flex items-center justify-between gap-2">
-                <div className="text-sm">
+                <div className="flex items-center text-sm">
+                  <PortfolioStar
+                    active={portfolioIds.has(token.id)}
+                    onToggle={() => onTogglePortfolio(token.id)}
+                  />
                   <span className="font-medium text-[var(--color-text)]">{token.symbol}</span>
                   <span className="ml-1.5 text-xs text-[var(--color-text-dim)]">{token.name}</span>
                 </div>
@@ -284,10 +305,103 @@ export function MarketWatchlist({
                   1M <RsiPill value={rsi["1M"]} />
                 </span>
               </div>
-            </button>
+            </div>
           );
         })}
       </div>
+    </>
+  );
+}
+
+interface MarketWatchlistProps {
+  tokens: MarketToken[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  currency: Currency;
+  /** Real multi-timeframe confluence score + per-timeframe RSI per token
+   * (see useWatchlistSignals) — the same score shows here and in the
+   * detail panel below, regardless of the chart's active timeframe. */
+  signalsByToken: Record<string, TokenSignals>;
+  /** Subset of `tokens` the user has marked as actually held, not just
+   * watched — splits the table into a "Meu Portfólio" group and the rest. */
+  portfolioIds: string[];
+  onTogglePortfolio: (id: string) => void;
+}
+
+export function MarketWatchlist({
+  tokens,
+  selectedId,
+  onSelect,
+  currency,
+  signalsByToken,
+  portfolioIds,
+  onTogglePortfolio,
+}: MarketWatchlistProps) {
+  const [sortKey, setSortKey] = useState<SortKey>("marketCap");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const portfolioSet = useMemo(() => new Set(portfolioIds), [portfolioIds]);
+
+  const sorted = useMemo(() => {
+    const copy = [...tokens];
+    copy.sort((a, b) => (a[sortKey] - b[sortKey]) * (sortDir === "asc" ? 1 : -1));
+    return copy;
+  }, [tokens, sortKey, sortDir]);
+
+  function handleSort(key: SortKey) {
+    if (key === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  }
+
+  const bigMovers = tokens.filter((t) => Math.abs(t.change24h) >= BIG_MOVE_THRESHOLD).length;
+  const portfolioTokens = sorted.filter((t) => portfolioSet.has(t.id));
+  const watchlistTokens = sorted.filter((t) => !portfolioSet.has(t.id));
+
+  const tableProps = {
+    selectedId,
+    onSelect,
+    currency,
+    signalsByToken,
+    portfolioIds: portfolioSet,
+    onTogglePortfolio,
+    sortKey,
+    sortDir,
+    onSort: handleSort,
+  };
+
+  return (
+    <Card
+      title="Visão geral do mercado"
+      action={
+        bigMovers > 0 ? (
+          <Badge tone="accent">
+            {bigMovers} {bigMovers === 1 ? "ativo" : "ativos"} com variação forte
+          </Badge>
+        ) : undefined
+      }
+    >
+      {portfolioTokens.length > 0 && (
+        <div className={watchlistTokens.length > 0 ? "mb-4" : ""}>
+          <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-dim)]">
+            <Star size={12} className="text-[var(--color-accent)]" fill="currentColor" />
+            Meu Portfólio
+          </h3>
+          <WatchlistTable tokens={portfolioTokens} {...tableProps} />
+        </div>
+      )}
+      {watchlistTokens.length > 0 && (
+        <div>
+          {portfolioTokens.length > 0 && (
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-dim)]">
+              Watchlist
+            </h3>
+          )}
+          <WatchlistTable tokens={watchlistTokens} {...tableProps} />
+        </div>
+      )}
     </Card>
   );
 }

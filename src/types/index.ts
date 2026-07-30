@@ -87,6 +87,9 @@ export interface AppSettings {
   chain: ChainKey;
   walletAddress: string;
   watchlist: string[];
+  /** Subset of `watchlist` the user has marked as actually held, not just
+   * watched — purely a manual tag, no quantities or values tracked. */
+  portfolio: string[];
   selectedTokenId: string;
   timeframe: Timeframe;
 }

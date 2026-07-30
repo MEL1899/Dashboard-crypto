@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chain: "eth",
   walletAddress: "",
   watchlist: [],
+  portfolio: [],
   selectedTokenId: "",
   timeframe: "1d",
 };
