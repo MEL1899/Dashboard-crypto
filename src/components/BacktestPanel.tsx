@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import clsx from "clsx";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Activity, ListChecks } from "lucide-react";
+import { ListChecks } from "lucide-react";
 import type { MarketToken } from "../types";
 import type { Currency } from "../lib/currency";
 import { POSITION_SIZE_PCT, type BacktestMode, type BacktestResult, type ExitReason } from "../lib/backtest";
@@ -70,12 +70,69 @@ interface SelectedDetail {
   isDemo: boolean;
 }
 
-const MODE_OPTIONS: { label: string; value: BacktestMode }[] = [
-  { label: "Compra/Venda (score ≥60 / ≤40)", value: "any" },
+/** The three ways to trade the backtest: the score's normal Compra/Venda
+ * range, its stricter Compra Forte/Venda Forte range, or RSI alone (no
+ * score at all) — one unified choice instead of two separate flows. */
+type Strategy = "strongOnly" | "any" | "rsi";
+
+const STRATEGY_OPTIONS: { label: string; value: Strategy }[] = [
   { label: "Só Compra Forte/Venda Forte (score ≥80 / ≤20)", value: "strongOnly" },
+  { label: "Compra/Venda (score ≥60 / ≤40)", value: "any" },
+  { label: "RSI puro", value: "rsi" },
 ];
 
 const RSI_PERIOD_OPTIONS = [7, 14, 21];
+
+interface PortfolioTotal {
+  investedPerToken: number;
+  totalInvested: number;
+  totalFinal: number;
+  totalReturnPct: number;
+  tokenCount: number;
+}
+
+/** Equal-weight blend of every token in a comparison table: pretend
+ * $100 went into each one at the same time, and add up where they all
+ * landed — a single number for "how did the whole watchlist do," not
+ * just the best or worst row. */
+function computePortfolioTotal(summaries: { result: BacktestResult }[]): PortfolioTotal | null {
+  if (summaries.length === 0) return null;
+  const investedPerToken = 100;
+  const totalInvested = investedPerToken * summaries.length;
+  const totalFinal = summaries.reduce((sum, s) => sum + (investedPerToken + s.result.strategyReturnPct), 0);
+  return {
+    investedPerToken,
+    totalInvested,
+    totalFinal,
+    totalReturnPct: ((totalFinal - totalInvested) / totalInvested) * 100,
+    tokenCount: summaries.length,
+  };
+}
+
+function PortfolioTotalBanner({ total, currency }: { total: PortfolioTotal; currency: Currency }) {
+  return (
+    <div className="mb-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+      <div className="text-xs text-[var(--color-text-dim)]">
+        P&L total da carteira unificada — {total.tokenCount} moeda{total.tokenCount > 1 ? "s" : ""},{" "}
+        {formatPrice(total.investedPerToken, currency)} em cada
+      </div>
+      <div
+        className={clsx(
+          "num-mono mt-1 flex flex-wrap items-baseline gap-2 text-lg font-semibold",
+          total.totalReturnPct >= 0 ? "text-[var(--color-up)]" : "text-[var(--color-down)]",
+        )}
+      >
+        <span>
+          {formatPrice(total.totalInvested, currency)} → {formatPrice(total.totalFinal, currency)}
+        </span>
+        <span className="text-sm">
+          ({total.totalReturnPct >= 0 ? "+" : ""}
+          {total.totalReturnPct.toFixed(1)}%)
+        </span>
+      </div>
+    </div>
+  );
+}
 
 function ComparisonTable<T extends { tokenId: string; symbol: string; result: BacktestResult; isDemo: boolean }>({
   summaries,
@@ -156,7 +213,7 @@ function ComparisonTable<T extends { tokenId: string; symbol: string; result: Ba
 }
 
 export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) {
-  const [mode, setMode] = useState<BacktestMode>("any");
+  const [strategy, setStrategy] = useState<Strategy>("any");
   const [rsiPeriod, setRsiPeriod] = useState(14);
   // Index into BACKTEST_WINDOW_OPTIONS, kept as a string since that's what
   // <select> values are — defaults to "Máximo disponível" (last option).
@@ -166,34 +223,32 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
   const scoreBatch = useBacktestAll();
   const rsiBatch = useRsiBacktestAll();
   const [selected, setSelected] = useState<SelectedDetail | null>(null);
+  // What was actually run last (may lag behind the `strategy` select if the
+  // user changes it without clicking "Rodar" again) — drives which batch's
+  // results the comparison table/detail section below show.
+  const [lastRun, setLastRun] = useState<{ source: "score" | "rsi"; label: string } | null>(null);
 
-  function handleRunScore() {
+  const running = strategy === "rsi" ? rsiBatch.running : scoreBatch.running;
+  const activeBatch = lastRun?.source === "rsi" ? rsiBatch : scoreBatch;
+
+  function handleRun() {
     if (tokens.length === 0) return;
     setSelected(null);
-    scoreBatch.runAll(tokens, apiKey, mode, windowDays);
+    if (strategy === "rsi") {
+      rsiBatch.runAll(tokens, rsiPeriod, apiKey, windowDays);
+      setLastRun({ source: "rsi", label: `RSI(${rsiPeriod})` });
+    } else {
+      const strategyLabel = STRATEGY_OPTIONS.find((opt) => opt.value === strategy)?.label ?? "Score";
+      scoreBatch.runAll(tokens, apiKey, strategy as BacktestMode, windowDays);
+      setLastRun({ source: "score", label: strategyLabel });
+    }
   }
 
-  function handleRunRsi() {
-    if (tokens.length === 0) return;
-    setSelected(null);
-    rsiBatch.runAll(tokens, rsiPeriod, apiKey, windowDays);
-  }
-
-  function handleSelectScore(s: BacktestSummary) {
+  function handleSelect(s: BacktestSummary | RsiBacktestSummary) {
+    if (!lastRun) return;
     setSelected({
-      source: "score",
-      sourceLabel: "Score",
-      tokenId: s.tokenId,
-      symbol: s.symbol,
-      result: s.result,
-      isDemo: s.isDemo,
-    });
-  }
-
-  function handleSelectRsi(s: RsiBacktestSummary) {
-    setSelected({
-      source: "rsi",
-      sourceLabel: `RSI(${rsiPeriod})`,
+      source: lastRun.source,
+      sourceLabel: lastRun.label,
       tokenId: s.tokenId,
       symbol: s.symbol,
       result: s.result,
@@ -203,21 +258,24 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
 
   return (
     <div className="flex flex-col gap-4">
-      <Card title="Backtest — Score de Oportunidade">
+      <Card title="Backtest">
         <p className="mb-3 text-xs leading-relaxed text-[var(--color-text-dim)]">
-          Simula o score como uma regra de swing trade pra toda a sua watchlist de uma vez,
-          operando comprado (long) E vendido (short): abre ou vira comprado no primeiro dia em
-          que o score entra na faixa de compra escolhida abaixo, abre ou vira vendido no
-          primeiro dia em que entra na faixa de venda — ou seja, também pode lucrar com o
-          mercado caindo, não só subindo. Cada entrada já sai com stop-loss e take-profit
-          calculados a partir do suporte/resistência recente (mínima/máxima das últimas 20
-          velas), e só {POSITION_SIZE_PCT}% do capital fica alocado por trade — o resto fica de
-          fora, então um trade ruim nunca zera a conta sozinho. Usa só o timeframe diário — não
-          a confluência completa de 5 timeframes do app — e não modela taxas nem slippage. Buy &
-          hold aparece como referência de contexto, não como meta: o que importa aqui é o
-          retorno absoluto da estratégia. Trate como um teste de direção do sinal, não uma
-          réplica exata do score ao vivo, e lembre que desempenho passado não garante resultado
-          futuro.
+          Simula uma regra de swing trade pra toda a sua watchlist de uma vez, operando comprado
+          (long) E vendido (short): abre ou vira comprado no primeiro dia em que o sinal
+          escolhido abaixo aponta compra, abre ou vira vendido no primeiro dia em que aponta
+          venda — ou seja, também pode lucrar com o mercado caindo, não só subindo. Escolha o
+          sinal: Compra Forte/Venda Forte e Compra/Venda usam o score completo (RSI + MACD +
+          Bollinger + tendência + força relativa) em faixas mais ou menos exigentes; RSI puro
+          usa só o RSI (≤30 compra, ≥70 vende), sem os outros indicadores — útil pra comparar
+          se eles realmente ajudam ou só atrapalham. Cada entrada já sai com stop-loss e
+          take-profit calculados a partir do suporte/resistência recente (mínima/máxima das
+          últimas 20 velas), e só {POSITION_SIZE_PCT}% do capital fica alocado por trade — o
+          resto fica de fora, então um trade ruim nunca zera a conta sozinho. Usa só o timeframe
+          diário — não a confluência completa de 5 timeframes do app — e não modela taxas nem
+          slippage. Buy & hold aparece como referência de contexto, não como meta: o que importa
+          aqui é o retorno absoluto da estratégia. Trate como um teste de direção do sinal, não
+          uma réplica exata do score ao vivo, e lembre que desempenho passado não garante
+          resultado futuro.
         </p>
 
         {tokens.length === 0 ? (
@@ -228,16 +286,29 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
           <div className="flex flex-col gap-2">
             <div className="flex flex-wrap items-center gap-2">
               <select
-                value={mode}
-                onChange={(e) => setMode(e.target.value as BacktestMode)}
+                value={strategy}
+                onChange={(e) => setStrategy(e.target.value as Strategy)}
                 className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
               >
-                {MODE_OPTIONS.map((opt) => (
+                {STRATEGY_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
                   </option>
                 ))}
               </select>
+              {strategy === "rsi" && (
+                <select
+                  value={rsiPeriod}
+                  onChange={(e) => setRsiPeriod(Number(e.target.value))}
+                  className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+                >
+                  {RSI_PERIOD_OPTIONS.map((p) => (
+                    <option key={p} value={p}>
+                      RSI({p})
+                    </option>
+                  ))}
+                </select>
+              )}
               <select
                 value={windowIndex}
                 onChange={(e) => setWindowIndex(e.target.value)}
@@ -250,104 +321,40 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                 ))}
               </select>
               <button
-                onClick={handleRunScore}
-                disabled={scoreBatch.running}
+                onClick={handleRun}
+                disabled={running}
                 className="flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
               >
-                {scoreBatch.running ? <Spinner /> : <ListChecks size={14} />}
+                {running ? <Spinner /> : <ListChecks size={14} />}
                 Rodar para toda a watchlist ({tokens.length})
               </button>
             </div>
-            {scoreBatch.running && (
+            {running && (
               <p className="text-xs text-[var(--color-text-dim)]">
-                Rodando {scoreBatch.progress.done} de {scoreBatch.progress.total}...
+                Rodando{" "}
+                {strategy === "rsi" ? rsiBatch.progress.done : scoreBatch.progress.done} de{" "}
+                {strategy === "rsi" ? rsiBatch.progress.total : scoreBatch.progress.total}...
               </p>
             )}
           </div>
         )}
       </Card>
 
-      {scoreBatch.summaries.length > 0 && (
-        <Card title="Comparação da watchlist — Score">
+      {lastRun && activeBatch.summaries.length > 0 && (
+        <Card title={`Comparação da watchlist — ${lastRun.label}`}>
           <p className="mb-2 text-xs text-[var(--color-text-dim)]">
             Ordenado pelo retorno absoluto da estratégia — clique numa linha pra ver os trades em
             detalhe abaixo.
           </p>
+          {(() => {
+            const total = computePortfolioTotal(activeBatch.summaries);
+            return total ? <PortfolioTotalBanner total={total} currency={currency} /> : null;
+          })()}
           <ComparisonTable
-            summaries={scoreBatch.summaries}
-            selectedTokenId={selected?.source === "score" ? selected.tokenId : null}
+            summaries={activeBatch.summaries}
+            selectedTokenId={selected?.source === lastRun.source ? selected.tokenId : null}
             currency={currency}
-            onSelect={handleSelectScore}
-          />
-        </Card>
-      )}
-
-      <Card title="Backtest — RSI puro">
-        <p className="mb-3 text-xs leading-relaxed text-[var(--color-text-dim)]">
-          Estratégia bem mais simples que o score, também long/short: abre ou vira comprado
-          quando o RSI cai a 30 ou menos, abre ou vira vendido quando sobe a 70 ou mais — sem
-          MACD, Bollinger, tendência ou força relativa. Mesmo stop-loss/take-profit por
-          suporte-resistência e mesma alocação parcial ({POSITION_SIZE_PCT}% por trade) do
-          backtest de score, pra comparação justa. Útil como comparação direta: o score
-          completo pode abrir uma compra mesmo com o RSI em sobrecompra moderada, se os outros
-          indicadores (tendência, MACD, força relativa) estiverem fortes o bastante pra
-          compensar — o que explica comprar perto de topos em movimentos de alta forte. Rodando
-          só o RSI isola esse comportamento.
-        </p>
-        {tokens.length > 0 && (
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                value={rsiPeriod}
-                onChange={(e) => setRsiPeriod(Number(e.target.value))}
-                className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
-              >
-                {RSI_PERIOD_OPTIONS.map((p) => (
-                  <option key={p} value={p}>
-                    RSI({p})
-                  </option>
-                ))}
-              </select>
-              <select
-                value={windowIndex}
-                onChange={(e) => setWindowIndex(e.target.value)}
-                className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
-              >
-                {BACKTEST_WINDOW_OPTIONS.map((opt, i) => (
-                  <option key={opt.label} value={i}>
-                    Janela: {opt.label}
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={handleRunRsi}
-                disabled={rsiBatch.running}
-                className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-text-dim)] hover:text-[var(--color-text)] disabled:opacity-60"
-              >
-                {rsiBatch.running ? <Spinner /> : <Activity size={14} />}
-                Rodar RSI para toda a watchlist ({tokens.length})
-              </button>
-            </div>
-            {rsiBatch.running && (
-              <p className="text-xs text-[var(--color-text-dim)]">
-                Rodando {rsiBatch.progress.done} de {rsiBatch.progress.total}...
-              </p>
-            )}
-          </div>
-        )}
-      </Card>
-
-      {rsiBatch.summaries.length > 0 && (
-        <Card title={`Comparação da watchlist — RSI(${rsiPeriod})`}>
-          <p className="mb-2 text-xs text-[var(--color-text-dim)]">
-            Ordenado pelo retorno absoluto da estratégia — clique numa linha pra ver os trades em
-            detalhe abaixo.
-          </p>
-          <ComparisonTable
-            summaries={rsiBatch.summaries}
-            selectedTokenId={selected?.source === "rsi" ? selected.tokenId : null}
-            currency={currency}
-            onSelect={handleSelectRsi}
+            onSelect={handleSelect}
           />
         </Card>
       )}
