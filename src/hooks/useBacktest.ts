@@ -20,12 +20,12 @@ const IDLE_STATE: BacktestState = { loading: false, error: null, isDemo: false, 
 export function useBacktest() {
   const [state, setState] = useState<BacktestState>(IDLE_STATE);
 
-  async function run(tokenId: string, apiKey?: string, mode: BacktestMode = "any") {
+  async function run(tokenId: string, apiKey?: string, mode: BacktestMode = "any", windowDays?: number) {
     setState({ loading: true, error: null, isDemo: false, result: null });
     try {
       const [candles, btcCandles] = await Promise.all([
-        fetchDailyCandles(tokenId, apiKey),
-        tokenId === BTC_TOKEN_ID ? Promise.resolve(null) : fetchDailyCandles(BTC_TOKEN_ID, apiKey),
+        fetchDailyCandles(tokenId, apiKey, windowDays),
+        tokenId === BTC_TOKEN_ID ? Promise.resolve(null) : fetchDailyCandles(BTC_TOKEN_ID, apiKey, windowDays),
       ]);
       setState({ loading: false, error: null, isDemo: false, result: runBacktest(candles, btcCandles, mode) });
     } catch (err) {

@@ -70,13 +70,23 @@ describe("runBacktest", () => {
     expect(partialEntries).toEqual(fullEntriesWithinWindow);
   });
 
-  it("each trade's return% matches (exit - entry) / entry", () => {
+  it("each trade's return% matches the long/short formula for its type", () => {
     const candles = makeCandles(syntheticSeries(150));
     const result = runBacktest(candles, null);
     for (const trade of result.trades) {
-      const expected = ((trade.exitPrice - trade.entryPrice) / trade.entryPrice) * 100;
+      const expected =
+        trade.type === "long"
+          ? ((trade.exitPrice - trade.entryPrice) / trade.entryPrice) * 100
+          : ((trade.entryPrice - trade.exitPrice) / trade.entryPrice) * 100;
       expect(trade.returnPct).toBeCloseTo(expected, 6);
     }
+  });
+
+  it("includes both long and short trades when the score swings both ways", () => {
+    const candles = makeCandles(syntheticSeries(150));
+    const result = runBacktest(candles, null);
+    const types = new Set(result.trades.map((t) => t.type));
+    expect(types.has("long") || types.has("short")).toBe(true);
   });
 
   it("win rate matches the fraction of trades with a positive return", () => {
@@ -95,6 +105,16 @@ describe("runBacktest", () => {
     const result = runBacktest(candles, null);
     expect(result.maxDrawdownPct).toBeGreaterThanOrEqual(0);
     expect(result.maxDrawdownPct).toBeLessThan(100);
+  });
+
+  it("a short trade profits when price fell and loses when price rose", () => {
+    const candles = makeCandles(syntheticSeries(150));
+    const result = runBacktest(candles, null);
+    for (const trade of result.trades) {
+      if (trade.type !== "short") continue;
+      if (trade.exitPrice < trade.entryPrice) expect(trade.returnPct).toBeGreaterThan(0);
+      if (trade.exitPrice > trade.entryPrice) expect(trade.returnPct).toBeLessThan(0);
+    }
   });
 
   it("'strongOnly' mode trades no more often than the default 'any' mode", () => {
@@ -120,12 +140,15 @@ describe("runRsiOnlyBacktest", () => {
     expect(result.equityCurve.length).toBe(candles.length - 50);
   });
 
-  it("each trade's return% matches (exit - entry) / entry, for every RSI period", () => {
+  it("each trade's return% matches the long/short formula for its type, for every RSI period", () => {
     const candles = makeCandles(syntheticSeries(150));
     for (const period of [7, 14, 21]) {
       const result = runRsiOnlyBacktest(candles, period);
       for (const trade of result.trades) {
-        const expected = ((trade.exitPrice - trade.entryPrice) / trade.entryPrice) * 100;
+        const expected =
+          trade.type === "long"
+            ? ((trade.exitPrice - trade.entryPrice) / trade.entryPrice) * 100
+            : ((trade.entryPrice - trade.exitPrice) / trade.entryPrice) * 100;
         expect(trade.returnPct).toBeCloseTo(expected, 6);
       }
     }

@@ -31,10 +31,10 @@ const RSI_PERIODS = [7, 14, 21];
 export function useRsiBacktest() {
   const [state, setState] = useState<RsiBacktestState>(IDLE_STATE);
 
-  async function run(tokenId: string, apiKey?: string) {
+  async function run(tokenId: string, apiKey?: string, windowDays?: number) {
     setState({ loading: true, error: null, isDemo: false, summaries: [] });
     try {
-      const candles = await fetchDailyCandles(tokenId, apiKey);
+      const candles = await fetchDailyCandles(tokenId, apiKey, windowDays);
       setState({
         loading: false,
         error: null,

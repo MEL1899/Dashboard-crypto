@@ -12,6 +12,7 @@ import {
 import { computeOpportunityScore } from "./opportunityScore";
 
 export interface BacktestTrade {
+  type: "long" | "short";
   entryTime: number;
   entryPrice: number;
   exitTime: number;
@@ -52,18 +53,42 @@ const RELATIVE_STRENGTH_WINDOW = 20;
 // the binding constraint is the trend filter's 50-period SMA.
 const WARMUP_INDEX = 50;
 
+/** "buy" opens/keeps a long, "sell" opens/keeps a short, "hold" leaves
+ * whatever position (long, short, or flat) untouched. */
 type SignalAction = "buy" | "sell" | "hold";
 /** Decides what to do given every candle up to and including "today" (the
  * last element of `window`) — never anything past it, so a signal function
  * can't accidentally peek into the future. */
 type SignalFn = (window: Candle[]) => SignalAction;
 
+interface OpenPosition {
+  type: "long" | "short";
+  entryTime: number;
+  entryPrice: number;
+}
+
+/** % return of one position at a given price — long profits as price rises,
+ * short profits as price falls. No leverage, no fees/slippage modeled. */
+function positionReturnPct(position: OpenPosition, price: number): number {
+  return position.type === "long"
+    ? ((price - position.entryPrice) / position.entryPrice) * 100
+    : ((position.entryPrice - price) / position.entryPrice) * 100;
+}
+
+/** Equity multiplier for one position's return, floored at 0 — an
+ * unleveraged position can lose its full stake but (in this simplified
+ * model, no margin calls) never more. */
+function equityFactor(returnPct: number): number {
+  return Math.max(0, 1 + returnPct / 100);
+}
+
 /**
- * Shared trade-simulation engine: opens a position the first day `signal`
- * says "buy" while flat, closes it the first day it says "sell" while
- * holding, and tracks equity/drawdown/buy-and-hold alongside it. Both
- * runBacktest (the full score) and runRsiOnlyBacktest (RSI alone) are just
- * this loop with a different `signal`.
+ * Shared trade-simulation engine, long AND short: on a "buy" signal it
+ * opens a long if flat, or flips a short straight into a long; a "sell"
+ * signal does the mirror image (open/flip to short). "hold" leaves
+ * whatever's open alone. Tracks equity/drawdown/buy-and-hold alongside it.
+ * Both runBacktest (the full score) and runRsiOnlyBacktest (RSI alone) are
+ * just this loop with a different `signal`.
  */
 function simulate(candles: Candle[], signal: SignalFn): BacktestResult {
   if (candles.length <= WARMUP_INDEX) return EMPTY_RESULT;
@@ -72,54 +97,57 @@ function simulate(candles: Candle[], signal: SignalFn): BacktestResult {
   const equityCurve: BacktestPoint[] = [];
 
   let equity = 100;
-  let position: { entryTime: number; entryPrice: number } | null = null;
+  let position: OpenPosition | null = null;
   const startPrice = candles[WARMUP_INDEX].close;
+
+  function close(exitTime: number, exitPrice: number) {
+    if (!position) return;
+    const returnPct = positionReturnPct(position, exitPrice);
+    trades.push({
+      type: position.type,
+      entryTime: position.entryTime,
+      entryPrice: position.entryPrice,
+      exitTime,
+      exitPrice,
+      returnPct,
+    });
+    equity *= equityFactor(returnPct);
+    position = null;
+  }
 
   for (let i = WARMUP_INDEX; i < candles.length; i++) {
     const window = candles.slice(0, i + 1);
     const lastClose = window[window.length - 1].close;
+    const time = window[i].time;
     const action = signal(window);
 
-    if (!position && action === "buy") {
-      position = { entryTime: window[i].time, entryPrice: lastClose };
-    } else if (position && action === "sell") {
-      trades.push({
-        entryTime: position.entryTime,
-        entryPrice: position.entryPrice,
-        exitTime: window[i].time,
-        exitPrice: lastClose,
-        returnPct: ((lastClose - position.entryPrice) / position.entryPrice) * 100,
-      });
-      equity *= lastClose / position.entryPrice;
-      position = null;
+    if (action === "buy" && position?.type !== "long") {
+      close(time, lastClose);
+      position = { type: "long", entryTime: time, entryPrice: lastClose };
+    } else if (action === "sell" && position?.type !== "short") {
+      close(time, lastClose);
+      position = { type: "short", entryTime: time, entryPrice: lastClose };
     }
 
     equityCurve.push({
-      time: window[i].time,
-      equity: position ? equity * (lastClose / position.entryPrice) : equity,
+      time,
+      equity: position ? equity * equityFactor(positionReturnPct(position, lastClose)) : equity,
       buyHoldEquity: (lastClose / startPrice) * 100,
     });
   }
 
-  // Still holding at the end of the window — close it out for a clean
+  // Still positioned at the end of the window — close it out for a clean
   // final number instead of leaving it as an unrealized, open position.
   if (position) {
     const last = candles[candles.length - 1];
-    trades.push({
-      entryTime: position.entryTime,
-      entryPrice: position.entryPrice,
-      exitTime: last.time,
-      exitPrice: last.close,
-      returnPct: ((last.close - position.entryPrice) / position.entryPrice) * 100,
-    });
-    equity *= last.close / position.entryPrice;
+    close(last.time, last.close);
   }
 
   let peak = -Infinity;
   let maxDrawdownPct = 0;
   for (const point of equityCurve) {
     if (point.equity > peak) peak = point.equity;
-    const drawdown = ((peak - point.equity) / peak) * 100;
+    const drawdown = peak > 0 ? ((peak - point.equity) / peak) * 100 : 0;
     if (drawdown > maxDrawdownPct) maxDrawdownPct = drawdown;
   }
 
@@ -142,21 +170,23 @@ function simulate(candles: Candle[], signal: SignalFn): BacktestResult {
 export type BacktestMode = "any" | "strongOnly";
 
 /**
- * Simulates the opportunity score's Compra/Venda levels as a simple
- * swing-trade rule against real historical daily candles: go long the
- * first day the score reads Compra/Compra Forte (or just Compra Forte in
- * "strongOnly" mode) while flat, close out the first day it reads the
- * matching sell level while holding. Each day's score is computed only
+ * Simulates the opportunity score's Compra/Venda levels as a swing-trade
+ * rule against real historical daily candles, long AND short: the first
+ * day the score reads Compra/Compra Forte it opens (or flips into) a long;
+ * the first day it reads Venda/Venda Forte it opens (or flips into) a
+ * short — so the strategy can profit from a falling market too, not just
+ * sit in cash while the score says sell. Each day's score is computed only
  * from candles up to and including that day — never a peek into the
  * future.
  *
  * This intentionally simplifies the live app's 5-timeframe confluence down
  * to a single daily timeframe: getting deep 1h/4h/1w/1M history for the
  * same historical window isn't practical from these free APIs, so a
- * faithful multi-timeframe backtest isn't possible here. Treat the result
- * as a directional check on whether the underlying signal has any edge at
- * all, not a precise replay of the live score, and remember past
- * performance doesn't guarantee future results.
+ * faithful multi-timeframe backtest isn't possible here. No fees, slippage,
+ * or leverage are modeled either. Treat the result as a directional check
+ * on whether the underlying signal has any edge at all, not a precise
+ * replay of the live score, and remember past performance doesn't
+ * guarantee future results.
  */
 export function runBacktest(
   candles: Candle[],
@@ -200,11 +230,13 @@ const RSI_OVERSOLD = 30;
 const RSI_OVERBOUGHT = 70;
 
 /**
- * A much simpler baseline strategy than the full score: buy the first day
- * RSI(period) drops to/below 30 while flat, sell the first day it rises
- * to/above 70 while holding. Useful as a comparison point — if the full
- * score doesn't clearly beat plain RSI, the extra indicators (MACD,
- * Bollinger, trend, relative strength) aren't earning their complexity.
+ * A much simpler baseline strategy than the full score: goes long (or
+ * flips into a long) the first day RSI(period) drops to/below 30, goes
+ * short (or flips into a short) the first day it rises to/above 70 — same
+ * long/short capability as runBacktest. Useful as a comparison point: if
+ * the full score doesn't clearly beat plain RSI, the extra indicators
+ * (MACD, Bollinger, trend, relative strength) aren't earning their
+ * complexity.
  */
 export function runRsiOnlyBacktest(candles: Candle[], rsiPeriod: number): BacktestResult {
   return simulate(candles, (window) => {

@@ -4,7 +4,8 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { Activity, ListChecks, Play } from "lucide-react";
 import type { MarketToken } from "../types";
 import type { Currency } from "../lib/currency";
-import type { BacktestMode } from "../lib/backtest";
+import type { BacktestMode, BacktestResult } from "../lib/backtest";
+import { BACKTEST_WINDOW_OPTIONS } from "../lib/backtestData";
 import { useBacktest } from "../hooks/useBacktest";
 import { useBacktestAll } from "../hooks/useBacktestAll";
 import { useRsiBacktest } from "../hooks/useRsiBacktest";
@@ -42,6 +43,18 @@ function StatTile({
   );
 }
 
+/** "DD/MM/AAAA a DD/MM/AAAA (N dias)" for the exact period the trades were
+ * actually simulated over — the warmup candles aren't included, since no
+ * trade can happen during them. */
+function dateRangeLabel(result: BacktestResult): string | null {
+  if (result.equityCurve.length === 0) return null;
+  const first = result.equityCurve[0].time;
+  const last = result.equityCurve[result.equityCurve.length - 1].time;
+  const days = Math.round((last - first) / 86400);
+  const fmt = (t: number) => new Date(t * 1000).toLocaleDateString("pt-BR");
+  return `${fmt(first)} a ${fmt(last)} (${days} dias)`;
+}
+
 const MODE_OPTIONS: { label: string; value: BacktestMode }[] = [
   { label: "Compra/Venda (score ≥60 / ≤40)", value: "any" },
   { label: "Só Compra Forte/Venda Forte (score ≥80 / ≤20)", value: "strongOnly" },
@@ -50,41 +63,40 @@ const MODE_OPTIONS: { label: string; value: BacktestMode }[] = [
 export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) {
   const [tokenId, setTokenId] = useState(tokens[0]?.id ?? "");
   const [mode, setMode] = useState<BacktestMode>("any");
+  // Index into BACKTEST_WINDOW_OPTIONS, kept as a string since that's what
+  // <select> values are — defaults to "Máximo disponível" (last option).
+  const [windowIndex, setWindowIndex] = useState(String(BACKTEST_WINDOW_OPTIONS.length - 1));
+  const windowDays = BACKTEST_WINDOW_OPTIONS[Number(windowIndex)]?.days;
+
   const backtest = useBacktest();
   const batch = useBacktestAll();
   const rsiBacktest = useRsiBacktest();
 
   function handleRun() {
     if (!tokenId) return;
-    backtest.run(tokenId, apiKey, mode);
+    backtest.run(tokenId, apiKey, mode, windowDays);
   }
 
   function handleRunAll() {
     if (tokens.length === 0) return;
-    batch.runAll(tokens, apiKey, mode);
+    batch.runAll(tokens, apiKey, mode, windowDays);
   }
 
   function handleSelectFromSummary(id: string) {
     setTokenId(id);
-    backtest.run(id, apiKey, mode);
+    backtest.run(id, apiKey, mode, windowDays);
   }
 
   function handleRunRsi() {
     if (!tokenId) return;
-    rsiBacktest.run(tokenId, apiKey);
+    rsiBacktest.run(tokenId, apiKey, windowDays);
   }
 
-  // Ranked by how much the score's timing beat (or lagged) just holding —
-  // the number that actually answers "is this worth automating for this
-  // token", more than the raw strategy return alone would.
+  // Ranked by absolute strategy return — profit is the goal here, not
+  // beating buy & hold (that's still shown alongside for context, since
+  // it's free information, but it's not what decides the order).
   const rankedSummaries = useMemo(
-    () =>
-      [...batch.summaries].sort(
-        (a, b) =>
-          b.result.strategyReturnPct -
-          b.result.buyHoldReturnPct -
-          (a.result.strategyReturnPct - a.result.buyHoldReturnPct),
-      ),
+    () => [...batch.summaries].sort((a, b) => b.result.strategyReturnPct - a.result.strategyReturnPct),
     [batch.summaries],
   );
 
@@ -92,15 +104,16 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
     <div className="flex flex-col gap-4">
       <Card title="Backtest — Score de Oportunidade">
         <p className="mb-3 text-xs leading-relaxed text-[var(--color-text-dim)]">
-          Simula o score como uma regra simples de swing trade: compra no primeiro dia em que
-          o score entra na faixa escolhida abaixo estando de fora, vende no primeiro dia em que
-          entra na faixa de venda correspondente estando posicionado. Usa até ~2,7 anos de
-          candles diários (via Binance) ou 1 ano (via CoinGecko, teto do plano gratuito) — mais
-          histórico do que a janela de 6 meses de antes, pra dar uma amostra de trades mais
-          confiável. Usa só o timeframe diário — não a confluência completa de 5 timeframes do
-          app, que exigiria histórico intradiário mais profundo do que as APIs gratuitas
-          oferecem. Trate como um teste de direção do sinal, não uma réplica exata do score ao
-          vivo, e lembre que desempenho passado não garante resultado futuro.
+          Simula o score como uma regra de swing trade, operando comprado (long) E vendido
+          (short): abre ou vira comprado no primeiro dia em que o score entra na faixa de
+          compra escolhida abaixo, abre ou vira vendido no primeiro dia em que entra na faixa
+          de venda — ou seja, também pode lucrar com o mercado caindo, não só subindo. Usa só o
+          timeframe diário — não a confluência completa de 5 timeframes do app, que exigiria
+          histórico intradiário mais profundo do que as APIs gratuitas oferecem — e não modela
+          taxas, slippage nem alavancagem. Buy & hold aparece como referência de contexto, não
+          como meta: o que importa aqui é o retorno absoluto da estratégia. Trate como um teste
+          de direção do sinal, não uma réplica exata do score ao vivo, e lembre que desempenho
+          passado não garante resultado futuro.
         </p>
 
         {tokens.length === 0 ? (
@@ -129,6 +142,17 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                 {MODE_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={windowIndex}
+                onChange={(e) => setWindowIndex(e.target.value)}
+                className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+              >
+                {BACKTEST_WINDOW_OPTIONS.map((opt, i) => (
+                  <option key={opt.label} value={i}>
+                    Janela: {opt.label}
                   </option>
                 ))}
               </select>
@@ -169,7 +193,7 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
       {rankedSummaries.length > 0 && (
         <Card title="Comparação da watchlist">
           <p className="mb-2 text-xs text-[var(--color-text-dim)]">
-            Ordenado pela diferença entre a estratégia e simplesmente segurar (buy & hold) —
+            Ordenado pelo retorno absoluto da estratégia (não pela comparação com buy & hold) —
             clique numa linha pra ver os trades em detalhe abaixo.
           </p>
           <div className="overflow-x-auto">
@@ -178,61 +202,52 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                 <tr>
                   <th className="py-1.5 pr-3 font-medium">Ativo</th>
                   <th className="py-1.5 pr-3 font-medium">Estratégia</th>
-                  <th className="py-1.5 pr-3 font-medium">Buy & Hold</th>
-                  <th className="py-1.5 pr-3 font-medium">Diferença</th>
+                  <th className="py-1.5 pr-3 font-medium">Buy & Hold (ref.)</th>
                   <th className="py-1.5 pr-3 font-medium">Trades</th>
                   <th className="py-1.5 pr-3 font-medium">Acerto</th>
+                  <th className="py-1.5 pr-3 font-medium">Drawdown</th>
                 </tr>
               </thead>
               <tbody>
-                {rankedSummaries.map((s) => {
-                  const diff = s.result.strategyReturnPct - s.result.buyHoldReturnPct;
-                  return (
-                    <tr
-                      key={s.tokenId}
-                      onClick={() => handleSelectFromSummary(s.tokenId)}
+                {rankedSummaries.map((s) => (
+                  <tr
+                    key={s.tokenId}
+                    onClick={() => handleSelectFromSummary(s.tokenId)}
+                    className={clsx(
+                      "cursor-pointer border-t border-[var(--color-border)] transition-colors hover:bg-white/5",
+                      s.tokenId === tokenId && "bg-[var(--color-accent)]/10",
+                    )}
+                  >
+                    <td className="py-1.5 pr-3 font-medium text-[var(--color-text)]">
+                      {s.symbol}
+                      {s.isDemo && (
+                        <span className="ml-1 text-[10px] text-[var(--color-text-dim)]">(demo)</span>
+                      )}
+                    </td>
+                    <td
                       className={clsx(
-                        "cursor-pointer border-t border-[var(--color-border)] transition-colors hover:bg-white/5",
-                        s.tokenId === tokenId && "bg-[var(--color-accent)]/10",
+                        "num-mono py-1.5 pr-3 font-medium",
+                        s.result.strategyReturnPct >= 0 ? "text-[var(--color-up)]" : "text-[var(--color-down)]",
                       )}
                     >
-                      <td className="py-1.5 pr-3 font-medium text-[var(--color-text)]">
-                        {s.symbol}
-                        {s.isDemo && (
-                          <span className="ml-1 text-[10px] text-[var(--color-text-dim)]">(demo)</span>
-                        )}
-                      </td>
-                      <td
-                        className={clsx(
-                          "num-mono py-1.5 pr-3",
-                          s.result.strategyReturnPct >= 0 ? "text-[var(--color-up)]" : "text-[var(--color-down)]",
-                        )}
-                      >
-                        {s.result.strategyReturnPct >= 0 ? "+" : ""}
-                        {s.result.strategyReturnPct.toFixed(1)}%
-                      </td>
-                      <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
-                        {s.result.buyHoldReturnPct >= 0 ? "+" : ""}
-                        {s.result.buyHoldReturnPct.toFixed(1)}%
-                      </td>
-                      <td
-                        className={clsx(
-                          "num-mono py-1.5 pr-3 font-medium",
-                          diff >= 0 ? "text-[var(--color-up)]" : "text-[var(--color-down)]",
-                        )}
-                      >
-                        {diff >= 0 ? "+" : ""}
-                        {diff.toFixed(1)}%
-                      </td>
-                      <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
-                        {s.result.trades.length}
-                      </td>
-                      <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
-                        {s.result.trades.length > 0 ? `${s.result.winRate.toFixed(0)}%` : "-"}
-                      </td>
-                    </tr>
-                  );
-                })}
+                      {s.result.strategyReturnPct >= 0 ? "+" : ""}
+                      {s.result.strategyReturnPct.toFixed(1)}%
+                    </td>
+                    <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
+                      {s.result.buyHoldReturnPct >= 0 ? "+" : ""}
+                      {s.result.buyHoldReturnPct.toFixed(1)}%
+                    </td>
+                    <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
+                      {s.result.trades.length}
+                    </td>
+                    <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
+                      {s.result.trades.length > 0 ? `${s.result.winRate.toFixed(0)}%` : "-"}
+                    </td>
+                    <td className="num-mono py-1.5 pr-3 text-[var(--color-down)]">
+                      -{s.result.maxDrawdownPct.toFixed(1)}%
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -242,10 +257,11 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
       {rsiBacktest.summaries.length > 0 && (
         <Card title="RSI puro — comparação de períodos">
           <p className="mb-2 text-xs leading-relaxed text-[var(--color-text-dim)]">
-            Estratégia bem mais simples que o score: compra quando o RSI cai a 30 ou menos,
-            vende quando sobe a 70 ou mais — sem MACD, Bollinger, tendência ou força relativa.
-            Serve de referência: se o score completo não bate claramente esse baseline, a
-            complexidade extra não está se pagando.
+            Estratégia bem mais simples que o score, também long/short: abre ou vira comprado
+            quando o RSI cai a 30 ou menos, abre ou vira vendido quando sobe a 70 ou mais — sem
+            MACD, Bollinger, tendência ou força relativa. Serve de referência: se o score
+            completo não bate claramente esse baseline, a complexidade extra não está se
+            pagando.
           </p>
           {rsiBacktest.isDemo && (
             <p className="mb-2 text-xs text-[var(--color-text-dim)]">
@@ -259,51 +275,38 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                 <tr>
                   <th className="py-1.5 pr-3 font-medium">Período do RSI</th>
                   <th className="py-1.5 pr-3 font-medium">Estratégia</th>
-                  <th className="py-1.5 pr-3 font-medium">Buy & Hold</th>
-                  <th className="py-1.5 pr-3 font-medium">Diferença</th>
+                  <th className="py-1.5 pr-3 font-medium">Buy & Hold (ref.)</th>
                   <th className="py-1.5 pr-3 font-medium">Trades</th>
                   <th className="py-1.5 pr-3 font-medium">Acerto</th>
                 </tr>
               </thead>
               <tbody>
-                {rsiBacktest.summaries.map((s) => {
-                  const diff = s.result.strategyReturnPct - s.result.buyHoldReturnPct;
-                  return (
-                    <tr key={s.period} className="border-t border-[var(--color-border)]">
-                      <td className="py-1.5 pr-3 font-medium text-[var(--color-text)]">
-                        RSI({s.period})
-                      </td>
-                      <td
-                        className={clsx(
-                          "num-mono py-1.5 pr-3",
-                          s.result.strategyReturnPct >= 0 ? "text-[var(--color-up)]" : "text-[var(--color-down)]",
-                        )}
-                      >
-                        {s.result.strategyReturnPct >= 0 ? "+" : ""}
-                        {s.result.strategyReturnPct.toFixed(1)}%
-                      </td>
-                      <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
-                        {s.result.buyHoldReturnPct >= 0 ? "+" : ""}
-                        {s.result.buyHoldReturnPct.toFixed(1)}%
-                      </td>
-                      <td
-                        className={clsx(
-                          "num-mono py-1.5 pr-3 font-medium",
-                          diff >= 0 ? "text-[var(--color-up)]" : "text-[var(--color-down)]",
-                        )}
-                      >
-                        {diff >= 0 ? "+" : ""}
-                        {diff.toFixed(1)}%
-                      </td>
-                      <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
-                        {s.result.trades.length}
-                      </td>
-                      <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
-                        {s.result.trades.length > 0 ? `${s.result.winRate.toFixed(0)}%` : "-"}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {rsiBacktest.summaries.map((s) => (
+                  <tr key={s.period} className="border-t border-[var(--color-border)]">
+                    <td className="py-1.5 pr-3 font-medium text-[var(--color-text)]">
+                      RSI({s.period})
+                    </td>
+                    <td
+                      className={clsx(
+                        "num-mono py-1.5 pr-3 font-medium",
+                        s.result.strategyReturnPct >= 0 ? "text-[var(--color-up)]" : "text-[var(--color-down)]",
+                      )}
+                    >
+                      {s.result.strategyReturnPct >= 0 ? "+" : ""}
+                      {s.result.strategyReturnPct.toFixed(1)}%
+                    </td>
+                    <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
+                      {s.result.buyHoldReturnPct >= 0 ? "+" : ""}
+                      {s.result.buyHoldReturnPct.toFixed(1)}%
+                    </td>
+                    <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
+                      {s.result.trades.length}
+                    </td>
+                    <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
+                      {s.result.trades.length > 0 ? `${s.result.winRate.toFixed(0)}%` : "-"}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -333,7 +336,7 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
               tone={backtest.result.strategyReturnPct >= 0 ? "up" : "down"}
             />
             <StatTile
-              label="Buy & Hold"
+              label="Buy & Hold (referência)"
               value={`${backtest.result.buyHoldReturnPct >= 0 ? "+" : ""}${backtest.result.buyHoldReturnPct.toFixed(1)}%`}
               tone={backtest.result.buyHoldReturnPct >= 0 ? "up" : "down"}
             />
@@ -347,6 +350,11 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
           </div>
 
           <Card title="Curva de capital (base 100)">
+            {dateRangeLabel(backtest.result) && (
+              <p className="mb-2 text-xs text-[var(--color-text-dim)]">
+                Período simulado: {dateRangeLabel(backtest.result)}
+              </p>
+            )}
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={backtest.result.equityCurve}>
@@ -398,6 +406,7 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                 <table className="w-full text-left text-xs">
                   <thead className="text-[var(--color-text-dim)]">
                     <tr>
+                      <th className="py-1.5 pr-3 font-medium">Direção</th>
                       <th className="py-1.5 pr-3 font-medium">Entrada</th>
                       <th className="py-1.5 pr-3 font-medium">Saída</th>
                       <th className="py-1.5 pr-3 font-medium">Preço entrada</th>
@@ -408,6 +417,18 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                   <tbody>
                     {backtest.result.trades.map((t) => (
                       <tr key={t.entryTime} className="border-t border-[var(--color-border)]">
+                        <td className="py-1.5 pr-3">
+                          <span
+                            className={clsx(
+                              "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                              t.type === "long"
+                                ? "bg-[var(--color-up)]/15 text-[var(--color-up)]"
+                                : "bg-[var(--color-down)]/15 text-[var(--color-down)]",
+                            )}
+                          >
+                            {t.type === "long" ? "Long" : "Short"}
+                          </span>
+                        </td>
                         <td className="py-1.5 pr-3">
                           {new Date(t.entryTime * 1000).toLocaleDateString("pt-BR")}
                         </td>
