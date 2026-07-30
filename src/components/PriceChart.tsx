@@ -15,10 +15,12 @@ interface PriceChartProps {
   rsi: IndicatorPoint[];
   volume: IndicatorPoint[];
   theme: "light" | "dark";
-  /** BTC's own candles for the "Comparar com BTC" overlay — plotted on its
-   * own left-axis scale (its price range rarely matches the open token's),
-   * omitted/empty when the comparison toggle is off. */
+  /** The comparison token's own candles for the chart overlay — plotted on
+   * its own left-axis scale (its price range rarely matches the open
+   * token's), omitted/empty when no comparison is selected. */
   compareCandles?: Candle[];
+  /** Symbol shown on the overlay's axis label (e.g. "BTC"). */
+  compareLabel?: string;
 }
 
 const COMPARE_LINE_COLOR = "#f59e0b";
@@ -38,6 +40,7 @@ export function PriceChart({
   volume,
   theme,
   compareCandles,
+  compareLabel,
 }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -140,7 +143,7 @@ export function PriceChart({
           priceScaleId: "left",
           lastValueVisible: true,
           priceLineVisible: false,
-          title: "BTC",
+          title: compareLabel ?? "",
         },
         0,
       );
@@ -188,7 +191,7 @@ export function PriceChart({
       chart.remove();
       chartRef.current = null;
     };
-  }, [candles, bollinger, rsi, volume, theme, compareCandles]);
+  }, [candles, bollinger, rsi, volume, theme, compareCandles, compareLabel]);
 
   return <div ref={containerRef} className="h-[560px] w-full" />;
 }

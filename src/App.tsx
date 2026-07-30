@@ -63,7 +63,7 @@ function App() {
   const [portfolio, setPortfolio] = useState<string[]>(settings.portfolio);
   const [tokenId, setTokenId] = useState<string | null>(settings.selectedTokenId || null);
   const [timeframe, setTimeframe] = useState<Timeframe>(settings.timeframe);
-  const [compareBtc, setCompareBtc] = useState(false);
+  const [compareTokenId, setCompareTokenId] = useState<string | null>(null);
   const [walletQuery, setWalletQuery] = useState<{ address: string; chain: ChainKey }>({
     address: settings.walletAddress,
     chain: settings.chain,
@@ -75,7 +75,15 @@ function App() {
   useScoreAlerts(signalsByToken, watchlistTokens.tokens, settings.alertsEnabled);
   const panorama = useMarketPanorama(settings.coingeckoApiKey || undefined);
   const market = useMarketData(tokenId, timeframe, settings.coingeckoApiKey || undefined);
-  const compare = useCompareCandles(compareBtc, tokenId, timeframe, settings.coingeckoApiKey || undefined);
+  const compare = useCompareCandles(compareTokenId, timeframe, settings.coingeckoApiKey || undefined);
+  const compareToken = watchlistTokens.tokens.find((t) => t.id === compareTokenId);
+  // Always offer BTC as a comparison baseline even if it's not on the
+  // watchlist, plus whatever else the user is already tracking — minus
+  // whichever token's chart is currently open (comparing it to itself).
+  const compareOptions = [
+    ...(watchlistTokens.tokens.some((t) => t.id === "bitcoin") ? [] : [{ id: "bitcoin", symbol: "BTC" }]),
+    ...watchlistTokens.tokens.map((t) => ({ id: t.id, symbol: t.symbol })),
+  ].filter((t) => t.id !== tokenId);
   const wallet = useWallet(walletQuery.address, walletQuery.chain, settings.etherscanApiKey);
 
   const selectedToken = watchlistTokens.tokens.find((t) => t.id === tokenId);
@@ -116,6 +124,9 @@ function App() {
     // A token no longer on the watchlist can't stay flagged as portfolio.
     const nextPortfolio = portfolio.filter((p) => p !== id);
     setPortfolio(nextPortfolio);
+    // BTC stays available as a comparison baseline even off the watchlist;
+    // anything else being removed can't stay selected as the comparison.
+    if (compareTokenId === id && id !== "bitcoin") setCompareTokenId(null);
     persist({
       ...settings,
       watchlist: nextWatchlist,
@@ -134,6 +145,8 @@ function App() {
 
   function handleTokenSelect(id: string) {
     setTokenId(id);
+    // Can't compare a token to itself.
+    if (compareTokenId === id) setCompareTokenId(null);
     persist({ ...settings, selectedTokenId: id });
   }
 
@@ -275,20 +288,29 @@ function App() {
                               </button>
                             ))}
                           </div>
-                          {tokenId !== "bitcoin" && (
-                            <button
-                              onClick={() => setCompareBtc((v) => !v)}
-                              aria-pressed={compareBtc}
+                          {compareOptions.length > 0 && (
+                            <label
                               className={clsx(
-                                "flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs",
-                                compareBtc
+                                "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs",
+                                compareTokenId
                                   ? "border-[#f59e0b] bg-[#f59e0b]/15 text-[#f59e0b]"
-                                  : "border-[var(--color-border)] text-[var(--color-text-dim)] hover:text-[var(--color-text)]",
+                                  : "border-[var(--color-border)] text-[var(--color-text-dim)]",
                               )}
                             >
                               <BarChart2 size={13} />
-                              Comparar com BTC
-                            </button>
+                              <select
+                                value={compareTokenId ?? ""}
+                                onChange={(e) => setCompareTokenId(e.target.value || null)}
+                                className="bg-transparent focus:outline-none [&>option]:text-[var(--color-text)] [&>option]:bg-[var(--color-surface)]"
+                              >
+                                <option value="">Comparar com...</option>
+                                {compareOptions.map((t) => (
+                                  <option key={t.id} value={t.id}>
+                                    {t.symbol}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
                           )}
                         </div>
                         <button
@@ -312,7 +334,8 @@ function App() {
                             rsi={market.rsi}
                             volume={market.volume}
                             theme={theme}
-                            compareCandles={compareBtc ? compare.candles : undefined}
+                            compareCandles={compareTokenId ? compare.candles : undefined}
+                            compareLabel={compareToken?.symbol ?? (compareTokenId === "bitcoin" ? "BTC" : undefined)}
                           />
                         </Suspense>
                       )}
