@@ -18,6 +18,10 @@ export interface BacktestTrade {
   exitTime: number;
   exitPrice: number;
   returnPct: number;
+  /** Running strategy equity right after this trade closed, on the same
+   * "started at 100" basis as the equity curve — e.g. 100 → 111 reads as
+   * "started with 100% of the stake, ended with 111%". */
+  equityAfter: number;
 }
 
 export interface BacktestPoint {
@@ -103,6 +107,7 @@ function simulate(candles: Candle[], signal: SignalFn): BacktestResult {
   function close(exitTime: number, exitPrice: number) {
     if (!position) return;
     const returnPct = positionReturnPct(position, exitPrice);
+    equity *= equityFactor(returnPct);
     trades.push({
       type: position.type,
       entryTime: position.entryTime,
@@ -110,8 +115,8 @@ function simulate(candles: Candle[], signal: SignalFn): BacktestResult {
       exitTime,
       exitPrice,
       returnPct,
+      equityAfter: equity,
     });
-    equity *= equityFactor(returnPct);
     position = null;
   }
 

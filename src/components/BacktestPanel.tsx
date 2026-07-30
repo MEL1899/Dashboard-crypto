@@ -73,10 +73,12 @@ const RSI_PERIOD_OPTIONS = [7, 14, 21];
 function ComparisonTable<T extends { tokenId: string; symbol: string; result: BacktestResult; isDemo: boolean }>({
   summaries,
   selectedTokenId,
+  currency,
   onSelect,
 }: {
   summaries: T[];
   selectedTokenId: string | null;
+  currency: Currency;
   onSelect: (s: T) => void;
 }) {
   // Ranked by absolute strategy return — profit is the goal here, not
@@ -94,6 +96,7 @@ function ComparisonTable<T extends { tokenId: string; symbol: string; result: Ba
           <tr>
             <th className="py-1.5 pr-3 font-medium">Ativo</th>
             <th className="py-1.5 pr-3 font-medium">Estratégia</th>
+            <th className="py-1.5 pr-3 font-medium">Simulação (base {formatPrice(100, currency)})</th>
             <th className="py-1.5 pr-3 font-medium">Buy & Hold (ref.)</th>
             <th className="py-1.5 pr-3 font-medium">Trades</th>
             <th className="py-1.5 pr-3 font-medium">Acerto</th>
@@ -122,6 +125,9 @@ function ComparisonTable<T extends { tokenId: string; symbol: string; result: Ba
               >
                 {s.result.strategyReturnPct >= 0 ? "+" : ""}
                 {s.result.strategyReturnPct.toFixed(1)}%
+              </td>
+              <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
+                {formatPrice(100, currency)} → {formatPrice(100 + s.result.strategyReturnPct, currency)}
               </td>
               <td className="num-mono py-1.5 pr-3 text-[var(--color-text-dim)]">
                 {s.result.buyHoldReturnPct >= 0 ? "+" : ""}
@@ -259,6 +265,7 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
           <ComparisonTable
             summaries={scoreBatch.summaries}
             selectedTokenId={selected?.source === "score" ? selected.tokenId : null}
+            currency={currency}
             onSelect={handleSelectScore}
           />
         </Card>
@@ -285,6 +292,17 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                 {RSI_PERIOD_OPTIONS.map((p) => (
                   <option key={p} value={p}>
                     RSI({p})
+                  </option>
+                ))}
+              </select>
+              <select
+                value={windowIndex}
+                onChange={(e) => setWindowIndex(e.target.value)}
+                className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+              >
+                {BACKTEST_WINDOW_OPTIONS.map((opt, i) => (
+                  <option key={opt.label} value={i}>
+                    Janela: {opt.label}
                   </option>
                 ))}
               </select>
@@ -315,6 +333,7 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
           <ComparisonTable
             summaries={rsiBatch.summaries}
             selectedTokenId={selected?.source === "rsi" ? selected.tokenId : null}
+            currency={currency}
             onSelect={handleSelectRsi}
           />
         </Card>
@@ -335,10 +354,15 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
 
       {selected && selected.result.equityCurve.length > 0 && (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <StatTile
               label="Retorno da estratégia"
               value={`${selected.result.strategyReturnPct >= 0 ? "+" : ""}${selected.result.strategyReturnPct.toFixed(1)}%`}
+              tone={selected.result.strategyReturnPct >= 0 ? "up" : "down"}
+            />
+            <StatTile
+              label="Simulação (base 100)"
+              value={`${formatPrice(100, currency)} → ${formatPrice(100 + selected.result.strategyReturnPct, currency)}`}
               tone={selected.result.strategyReturnPct >= 0 ? "up" : "down"}
             />
             <StatTile
@@ -409,6 +433,11 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
               </p>
             ) : (
               <div className="overflow-x-auto">
+                <p className="mb-2 text-xs text-[var(--color-text-dim)]">
+                  "Saldo" simula {formatPrice(100, currency)} investidos no início, acumulando
+                  o resultado de cada trade em sequência — assim dá pra ver a evolução real do
+                  capital, não só a % de cada operação isolada.
+                </p>
                 <table className="w-full text-left text-xs">
                   <thead className="text-[var(--color-text-dim)]">
                     <tr>
@@ -418,6 +447,7 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                       <th className="py-1.5 pr-3 font-medium">Preço entrada</th>
                       <th className="py-1.5 pr-3 font-medium">Preço saída</th>
                       <th className="py-1.5 pr-3 font-medium">Retorno</th>
+                      <th className="py-1.5 pr-3 font-medium">Saldo (base {formatPrice(100, currency)})</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -451,6 +481,14 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
                         >
                           {t.returnPct >= 0 ? "+" : ""}
                           {t.returnPct.toFixed(2)}%
+                        </td>
+                        <td
+                          className={clsx(
+                            "num-mono py-1.5 pr-3 font-medium",
+                            t.equityAfter >= 100 ? "text-[var(--color-up)]" : "text-[var(--color-down)]",
+                          )}
+                        >
+                          {formatPrice(t.equityAfter, currency)}
                         </td>
                       </tr>
                     ))}

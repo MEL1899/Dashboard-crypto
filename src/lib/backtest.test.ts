@@ -125,6 +125,20 @@ describe("runBacktest", () => {
     // Compra/Venda, so it can never open MORE trades than the looser rule.
     expect(strongOnly.trades.length).toBeLessThanOrEqual(any.trades.length);
   });
+
+  it("equityAfter compounds the trades in order, starting from 100, and matches the final strategy return", () => {
+    const candles = makeCandles(syntheticSeries(150));
+    const result = runBacktest(candles, null);
+    let expectedEquity = 100;
+    for (const trade of result.trades) {
+      expectedEquity *= Math.max(0, 1 + trade.returnPct / 100);
+      expect(trade.equityAfter).toBeCloseTo(expectedEquity, 6);
+    }
+    if (result.trades.length > 0) {
+      const lastEquityAfter = result.trades[result.trades.length - 1].equityAfter;
+      expect(lastEquityAfter).toBeCloseTo(100 + result.strategyReturnPct, 6);
+    }
+  });
 });
 
 describe("runRsiOnlyBacktest", () => {
