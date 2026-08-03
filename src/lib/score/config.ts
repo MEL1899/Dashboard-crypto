@@ -1,0 +1,244 @@
+/**
+ * Single source of truth for how the opportunity score is calculated.
+ *
+ * Everything that decides a number lives here — group weights, metric
+ * weights, clip ranges and, critically, each metric's *direction*. The
+ * scoring functions read this config and the "Como esse score é calculado?"
+ * panel is generated from this same object, so the documentation can never
+ * drift from the math (see docs/pesquisa-score-oportunidade.md, section 3:
+ * of the published composite indices only Alternative.me's Fear & Greed
+ * discloses its exact weights).
+ *
+ * Nothing here is hardcoded at a call site on purpose: making weights vary
+ * by market regime later should be a data change in this file, not a
+ * rewrite of the scoring code.
+ */
+
+/** Normalized metric scale: 0 = extremely bearish, 50 = neutral, 100 =
+ * extremely bullish. Every raw metric is mapped onto this before any
+ * weighting happens (OECD Handbook on Composite Indicators, min-max). */
+export const NEUTRAL = 50;
+export const SCORE_MIN = 0;
+export const SCORE_MAX = 100;
+
+/**
+ * Which way a raw metric points once normalized.
+ *
+ * - "direct": a higher raw value is more bullish (momentum/trend reading).
+ * - "inverted": a higher raw value is more bearish (mean-reversion or
+ *   contrarian reading — overbought, overvalued, crowded long).
+ *
+ * This is the single most consequential choice in the whole file and it is
+ * NOT settled by the research: the same RSI is bullish-when-high to a
+ * momentum trader and bearish-when-high to a mean-reversion trader. The
+ * defaults below follow the studies the research doc actually cites (which
+ * tested classic overbought/oversold thresholds) and the fact that this is
+ * an *entry opportunity* score — an oversold asset is an opportunity, not a
+ * warning. Flip any of these here to test the opposite convention.
+ */
+export type MetricDirection = "direct" | "inverted";
+
+export interface MetricSpec {
+  /** Stable id, also used as the key of the raw-value input. */
+  id: string;
+  label: string;
+  /** Share of its group, 0-1. Weights within a group sum to 1. */
+  weight: number;
+  direction: MetricDirection;
+  /** Raw values are clamped to [min, max] then linearly mapped to 0-100.
+   * Ranges centred on the neutral point keep 50 meaningful. */
+  clip: { min: number; max: number };
+  /** Shown in the transparency panel so a user can audit the mapping. */
+  rationale: string;
+  unit?: string;
+}
+
+export interface GroupSpec {
+  id: "technical" | "onchain" | "sentiment";
+  label: string;
+  /** Share of the final score, 0-1. Groups sum to 1. */
+  weight: number;
+  metrics: MetricSpec[];
+}
+
+/**
+ * Technical group. Sub-weights follow the research doc's section 1: RSI
+ * beat MACD in two independent studies (52.8% vs 46.7% hit rate, €22,800 vs
+ * €900 simulated profit over the same 10 assets), and Bollinger Bands was
+ * the best single indicator in two others (ETH Zürich thesis, Sharpe 3.2;
+ * Freqtrade 2025 study, best of all strategies tested). MACD was the worst
+ * performer in three separate studies, so it carries the smallest weight it
+ * can while still contributing.
+ */
+const TECHNICAL: GroupSpec = {
+  id: "technical",
+  label: "Técnico",
+  weight: 1 / 3,
+  metrics: [
+    {
+      id: "rsi",
+      label: "RSI multi-timeframe (1H/4H/1D)",
+      weight: 0.35,
+      // Mean-reversion reading: RSI 30 (oversold) is the buy opportunity,
+      // RSI 70 (overbought) is the warning. This inverts the raw value.
+      direction: "inverted",
+      clip: { min: 0, max: 100 },
+      rationale:
+        "RSI já é nativo 0-100. Lido como sobrecompra/sobrevenda (o mesmo critério dos estudos citados): RSI baixo = oportunidade de compra. Os 3 timeframes entram com peso maior no mais longo, já que o RSI perdeu poder preditivo em timeframes curtos (Sharpe 5,13 no 4H vs -0,45 no 5min).",
+    },
+    {
+      id: "bollingerPercentB",
+      label: "Bollinger %b",
+      weight: 0.35,
+      // %b = 0 → price at the lower band (oversold), %b = 1 → upper band.
+      direction: "inverted",
+      clip: { min: 0, max: 1 },
+      rationale:
+        "%b posiciona o preço dentro das bandas: 0 = banda inferior, 1 = superior. Lido como reversão à média (preço na banda inferior = oportunidade), que é a leitura clássica das estratégias de BB testadas na tese da ETH Zürich.",
+    },
+    {
+      id: "macdHistogram",
+      label: "MACD (histograma)",
+      weight: 0.15,
+      // Momentum reading: a positive histogram is bullish momentum.
+      direction: "direct",
+      clip: { min: -1.5, max: 1.5 },
+      unit: "% do preço",
+      rationale:
+        "Histograma normalizado como % do preço, para o valor não depender da escala do ativo. Peso baixo porque o MACD foi o pior indicador em três estudos independentes.",
+    },
+    {
+      id: "emaDistance",
+      label: "Distância da EMA longa",
+      weight: 0.15,
+      // Trend reading: price above the long EMA is an uptrend.
+      direction: "direct",
+      clip: { min: -10, max: 10 },
+      unit: "%",
+      rationale:
+        "Distância percentual do preço até a EMA longa — mede tendência, não sobrecompra. Positivo = preço acima da média = tendência de alta.",
+    },
+  ],
+};
+
+/**
+ * On-chain group. v1 uses only the three metrics obtainable from free or
+ * public APIs, at equal weight. SOPR, Puell Multiple and Reserve Risk are
+ * defined in the research doc (section 2) and are the intended v2 additions
+ * — adding one is a matter of appending a MetricSpec here and rebalancing
+ * the weights.
+ */
+const ONCHAIN: GroupSpec = {
+  id: "onchain",
+  label: "On-chain",
+  weight: 1 / 3,
+  metrics: [
+    {
+      id: "mvrvZScore",
+      label: "MVRV Z-Score",
+      weight: 1 / 3,
+      // High Z-Score = market cap far above realized cap = the historical
+      // top zone, so it reads bearish.
+      direction: "inverted",
+      clip: { min: -2, max: 8 },
+      rationale:
+        "Desvio estatístico do valuation. Clipado entre -2 e 8 e invertido: Z-Score alto é a zona de topo histórica (Glassnode), Z-Score perto de zero ou negativo é zona de fundo.",
+    },
+    {
+      id: "fundingRate",
+      label: "Funding Rate (perpétuos)",
+      weight: 1 / 3,
+      // Sustained positive funding = crowded long = top risk.
+      direction: "inverted",
+      clip: { min: -0.05, max: 0.05 },
+      unit: "% ao dia",
+      rationale:
+        "Clipado num range simétrico e invertido: funding muito positivo indica excesso de alavancagem comprada (risco de topo); muito negativo, risco de short squeeze. Atenção ao viés estrutural — a BitMEX mediu funding positivo em 92% do tempo.",
+    },
+    {
+      id: "exchangeNetflow",
+      label: "Exchange Netflow",
+      weight: 1 / 3,
+      // Coins flowing INTO exchanges = supply available to sell = bearish.
+      direction: "inverted",
+      clip: { min: -3, max: 3 },
+      unit: "desvios vs. média 7d",
+      rationale:
+        "Normalizado pela variação relativa à média móvel de 7 dias, não pelo valor absoluto (a CryptoQuant trata a métrica como leitura relativa). Invertido: entrada líquida em exchanges = pressão vendedora.",
+    },
+  ],
+};
+
+/**
+ * Sentiment group. v1 consumes Alternative.me's published index directly
+ * and uses it as the entire group, per the research doc's finding that it
+ * is the only major composite index disclosing exact weights (Volatilidade
+ * 25%, Momentum/Volume 25%, Redes sociais 15%, Surveys 15%, Dominância BTC
+ * 10%, Google Trends 10%). Re-implementing that formula ourselves only
+ * makes sense if we later want to customize those weights.
+ */
+const SENTIMENT: GroupSpec = {
+  id: "sentiment",
+  label: "Sentimento",
+  weight: 1 / 3,
+  metrics: [
+    {
+      id: "fearGreed",
+      label: "Fear & Greed Index",
+      weight: 1,
+      // Taken at face value: greed reads bullish, fear reads bearish. Note
+      // this is the momentum reading — the contrarian convention ("be
+      // greedy when others are fearful") would flip it to "inverted", which
+      // would also line it up with the mean-reversion direction used in the
+      // technical group. Left "direct" because that is how the index is
+      // published and read; flip here to test the contrarian version.
+      direction: "direct",
+      clip: { min: 0, max: 100 },
+      rationale:
+        "Índice pronto da Alternative.me (0 = medo extremo, 100 = ganância extrema), usado como o grupo inteiro na v1. É o único índice composto da indústria que publica componentes e pesos exatos.",
+    },
+  ],
+};
+
+export interface ScoreWeightConfig {
+  groups: GroupSpec[];
+  /** Weights applied to each RSI timeframe before they are combined into
+   * the single `rsi` metric. Longer timeframes weigh more: the research doc
+   * records the same RSI strategy at Sharpe 5.13 on 4H and -0.45 on 5min. */
+  rsiTimeframeWeights: { "1h": number; "4h": number; "1d": number };
+}
+
+/**
+ * Market regime the score is being computed under. The research doc
+ * (section 1) shows Bollinger Bands performing oppositely in bear vs bull
+ * markets, so group weights arguably should vary by regime.
+ *
+ * v1 deliberately does NOT vary them: every regime resolves to the same
+ * config below. The plumbing exists so that turning it on later is a data
+ * change in WEIGHTS_BY_REGIME, not a change to any scoring function.
+ */
+export type MarketRegime = "uptrend" | "downtrend" | "range" | "unknown";
+
+const BASE_CONFIG: ScoreWeightConfig = {
+  groups: [TECHNICAL, ONCHAIN, SENTIMENT],
+  rsiTimeframeWeights: { "1h": 0.2, "4h": 0.3, "1d": 0.5 },
+};
+
+/** All regimes intentionally share one config in v1 — see MarketRegime. */
+export const WEIGHTS_BY_REGIME: Record<MarketRegime, ScoreWeightConfig> = {
+  uptrend: BASE_CONFIG,
+  downtrend: BASE_CONFIG,
+  range: BASE_CONFIG,
+  unknown: BASE_CONFIG,
+};
+
+export function configForRegime(regime: MarketRegime = "unknown"): ScoreWeightConfig {
+  return WEIGHTS_BY_REGIME[regime];
+}
+
+/** Confluence thresholds (Layer 2). A group above HIGH is read as bullish,
+ * below LOW as bearish; agreement across all available groups is "high
+ * confluence". These bounds match the buy/sell badge bands so the label
+ * never contradicts the badge. */
+export const CONFLUENCE_BULLISH_ABOVE = 60;
+export const CONFLUENCE_BEARISH_BELOW = 40;
