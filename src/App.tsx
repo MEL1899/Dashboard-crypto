@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, type ReactNode } from "react";
 import clsx from "clsx";
-import { BarChart2, History, LayoutDashboard, Moon, Settings, Sun, Wallet, X } from "lucide-react";
+import { BarChart2, History, LayoutDashboard, Moon, Settings, Sigma, Sun, Wallet, X } from "lucide-react";
 import { useMarketData } from "./hooks/useMarketData";
 import { useWatchlistTokens } from "./hooks/useWatchlistTokens";
 import { useWatchlistSignals } from "./hooks/useWatchlistSignals";
@@ -38,6 +38,12 @@ const WalletPanel = lazy(() =>
 const BacktestPanel = lazy(() =>
   import("./components/BacktestPanel").then((m) => ({ default: m.BacktestPanel })),
 );
+const ScoreMethodologyPanel = lazy(() =>
+  import("./components/ScoreMethodologyPanel").then((m) => ({ default: m.ScoreMethodologyPanel })),
+);
+const RiskGuidancePanel = lazy(() =>
+  import("./components/RiskGuidancePanel").then((m) => ({ default: m.RiskGuidancePanel })),
+);
 
 function TabFallback() {
   return (
@@ -55,7 +61,7 @@ const TIMEFRAME_OPTIONS: { label: string; value: Timeframe }[] = [
   { label: "1M", value: "1M" },
 ];
 
-type Tab = "market" | "wallet" | "backtest";
+type Tab = "market" | "wallet" | "backtest" | "score";
 
 function App() {
   const [settings, setSettings] = useState(loadSettings());
@@ -180,6 +186,9 @@ function App() {
             </TabButton>
             <TabButton active={tab === "backtest"} onClick={() => setTab("backtest")} icon={<History size={14} />}>
               Backtest
+            </TabButton>
+            <TabButton active={tab === "score"} onClick={() => setTab("score")} icon={<Sigma size={14} />}>
+              Score
             </TabButton>
           </nav>
 
@@ -363,13 +372,29 @@ function App() {
               onSubmit={handleWalletSubmit}
             />
           </Suspense>
-        ) : (
+        ) : tab === "backtest" ? (
           <Suspense fallback={<TabFallback />}>
             <BacktestPanel
               tokens={watchlistTokens.tokens}
               apiKey={settings.coingeckoApiKey || undefined}
               currency={MERCADO_CURRENCY}
             />
+          </Suspense>
+        ) : (
+          <Suspense fallback={<TabFallback />}>
+            <div className="flex flex-col gap-4">
+              {/* The new layered score isn't wired to live data yet, so the
+                  methodology panel renders in documentation-only mode. Once
+                  a real reading exists, passing it as `result` fills in each
+                  metric's current value with no change here. */}
+              <div className="rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-3 py-2 text-xs text-[var(--color-text)]">
+                O novo score em camadas ainda não está ligado às fontes de dados — abaixo está a
+                fórmula documentada e a calculadora de risco, ambas já funcionais. O selo em uso na
+                aba Mercado continua sendo o score antigo.
+              </div>
+              <ScoreMethodologyPanel />
+              <RiskGuidancePanel currency={MERCADO_CURRENCY} />
+            </div>
           </Suspense>
         )}
       </main>
