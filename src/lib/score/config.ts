@@ -216,6 +216,11 @@ const SENTIMENT: GroupSpec = {
       id: "fearGreed",
       label: "Fear & Greed Index",
       weight: 1,
+      // DECIDIDO POR RACIOCÍNIO, NÃO POR MEDIÇÃO: o A/B em
+      // scripts/fng-direction-ab.ts existe e está pronto, mas foi
+      // dispensado — nenhum dado histórico sustenta esta direção contra a
+      // alternativa. Rodar `npm run ab:fng` ainda é a forma de conferir.
+      //
       // Contrarian reading: extreme greed is the warning, extreme fear is
       // the opportunity. "Be greedy when others are fearful" is literally
       // why the index was created, and it lines sentiment up with the

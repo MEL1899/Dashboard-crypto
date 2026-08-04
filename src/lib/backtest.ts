@@ -114,6 +114,47 @@ const MIN_REWARD_RISK_RATIO = 2;
 // account instead of being able to compound into a full wipeout.
 export const POSITION_SIZE_PCT = 50;
 
+/**
+ * What is allowed to close an open position.
+ *
+ * - "flipOnSignal": the opposite signal closes at market and reverses.
+ * - "stopAndTargetOnly": only the stop, the take-profit, or the end of the
+ *   window. The signal can open a position but never closes one.
+ *
+ * Both are currently defective, in opposite directions, and neither should
+ * be trusted until the target-placement problem below is resolved.
+ *
+ * "flipOnSignal" cuts winners short. Measured on real BTC daily candles, 7
+ * of 9 trades exited on the opposite signal and the take-profit never fired
+ * once — winners closed at whatever price the signal happened to turn at
+ * while losers ran to the full stop. The break-even win rate came out at
+ * 60% instead of the 33% a 1:2 stop/target implies: the system advertised
+ * one risk-reward and delivered another.
+ *
+ * "stopAndTargetOnly" was written to fix that and instead degenerates. On a
+ * 300-candle synthetic series it produced just 2 trades, because the target
+ * is placed at 2x the stop distance (computeStopAndTarget takes the MAX of
+ * "distance to resistance" and "2x stop"), and the stop itself comes from a
+ * 20-period Donchian channel that can be 13% wide. A target 26% away is
+ * simply not reachable in one leg, so positions open and then sit until the
+ * window ends. That is buy-and-hold wearing a costume, not a strategy.
+ *
+ * The shared root cause is target placement, not the exit rule: a minimum
+ * reward-to-risk enforced by pushing the target further out produces
+ * targets that never pay. The textbook alternative is the reverse — put the
+ * target at the real resistance level and simply decline entries whose
+ * resulting reward-to-risk is below the minimum. That is an entry filter,
+ * a bigger behavioural change, and it needs measuring on real data before
+ * being chosen.
+ *
+ * Default stays "flipOnSignal" deliberately: it is the variant that has an
+ * actual measurement behind it, and swapping in an unmeasured default that
+ * trades twice in a year would be a silent regression.
+ */
+export type ExitPolicy = "stopAndTargetOnly" | "flipOnSignal";
+
+export const DEFAULT_EXIT_POLICY: ExitPolicy = "flipOnSignal";
+
 // Real trading isn't free, and pretending it is flatters short-horizon
 // strategies enormously: a rule that trades every other candle can look
 // profitable gross and still bleed to death on fees. Charged per leg, so a
@@ -281,6 +322,7 @@ function simulate(
   signal: SignalFn,
   timeframe: BacktestTimeframe,
   external: ExternalSeriesInput = {},
+  exitPolicy: ExitPolicy = DEFAULT_EXIT_POLICY,
 ): BacktestResult {
   if (candles.length <= WARMUP_INDEX) return EMPTY_RESULT;
 
@@ -343,11 +385,19 @@ function simulate(
     }
 
     const action = signal({ window, external: alignedExternal[i] });
-    if (action === "buy" && position?.type !== "long") {
+
+    // Under "stopAndTargetOnly" an open position is left alone no matter
+    // what the signal says — only the stop, the target or the end of the
+    // window can close it. Under "flipOnSignal" the opposite signal closes
+    // it at market and reverses. See ExitPolicy for why the default moved.
+    const signalMayClose = exitPolicy === "flipOnSignal";
+    const canAct = position === null || signalMayClose;
+
+    if (canAct && action === "buy" && position?.type !== "long") {
       if (position) recordTrade(position, time, lastClose, "signal");
       const { stopPrice, takeProfitPrice } = computeStopAndTarget("long", lastClose, window, timeframe);
       position = { type: "long", entryTime: time, entryPrice: lastClose, stopPrice, takeProfitPrice };
-    } else if (action === "sell" && position?.type !== "short") {
+    } else if (canAct && action === "sell" && position?.type !== "short") {
       if (position) recordTrade(position, time, lastClose, "signal");
       const { stopPrice, takeProfitPrice } = computeStopAndTarget("short", lastClose, window, timeframe);
       position = { type: "short", entryTime: time, entryPrice: lastClose, stopPrice, takeProfitPrice };
@@ -429,6 +479,7 @@ export function runBacktest(
   btcCandles: Candle[] | null,
   mode: BacktestMode = "any",
   timeframe: BacktestTimeframe = "1d",
+  exitPolicy: ExitPolicy = DEFAULT_EXIT_POLICY,
 ): BacktestResult {
   return simulate(
     candles,
@@ -464,6 +515,8 @@ export function runBacktest(
       return "hold";
     },
     timeframe,
+    {},
+    exitPolicy,
   );
 }
 
@@ -483,6 +536,7 @@ export function runRsiOnlyBacktest(
   candles: Candle[],
   rsiPeriod: number,
   timeframe: BacktestTimeframe = "1d",
+  exitPolicy: ExitPolicy = DEFAULT_EXIT_POLICY,
 ): BacktestResult {
   return simulate(
     candles,
@@ -495,6 +549,8 @@ export function runRsiOnlyBacktest(
       return "hold";
     },
     timeframe,
+    {},
+    exitPolicy,
   );
 }
 
@@ -546,6 +602,10 @@ export function runRandomBaseline(
   tradeFrequency: number,
   seed: string,
   timeframe: BacktestTimeframe = "1d",
+  /** Must match the strategy being compared against: a control group that
+   * exits differently isn't a control for the signal, it's a control for
+   * the exit rule. */
+  exitPolicy: ExitPolicy = DEFAULT_EXIT_POLICY,
 ): BacktestResult {
   const rng = mulberry32(seedFromString(seed));
   return simulate(
@@ -555,6 +615,8 @@ export function runRandomBaseline(
       return rng() < 0.5 ? "buy" : "sell";
     },
     timeframe,
+    {},
+    exitPolicy,
   );
 }
 
@@ -590,9 +652,16 @@ export function runScoreBacktest(
     external?: ExternalSeriesInput;
     /** Swaps the weight/direction config — used by the direction A/B. */
     config?: ScoreWeightConfig;
+    exitPolicy?: ExitPolicy;
   } = {},
 ): BacktestResult {
-  const { timeframe = "1d", mode = "any", external = {}, config } = options;
+  const {
+    timeframe = "1d",
+    mode = "any",
+    external = {},
+    config,
+    exitPolicy = DEFAULT_EXIT_POLICY,
+  } = options;
 
   return simulate(
     candles,
@@ -643,5 +712,6 @@ export function runScoreBacktest(
     },
     timeframe,
     external,
+    exitPolicy,
   );
 }

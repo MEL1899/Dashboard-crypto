@@ -242,6 +242,47 @@ describe("runBacktest", () => {
   });
 });
 
+describe("exit policy", () => {
+  const candles = makeCandles(syntheticSeries(300));
+
+  it("'stopAndTargetOnly' never closes a position on an opposite signal", () => {
+    const held = runBacktest(candles, null, "any", "1d", "stopAndTargetOnly");
+    expect(held.trades.some((t) => t.exitReason === "signal")).toBe(false);
+    for (const trade of held.trades) {
+      expect(["stop", "target", "end"]).toContain(trade.exitReason);
+    }
+  });
+
+  it("'flipOnSignal' does close on the opposite signal — the cut-winners defect", () => {
+    const flipped = runBacktest(candles, null, "any", "1d", "flipOnSignal");
+    expect(flipped.trades.some((t) => t.exitReason === "signal")).toBe(true);
+  });
+
+  it("documents that 'stopAndTargetOnly' currently degenerates into far too few trades", () => {
+    // Not an aspiration — a guard on a known defect. The target sits at 2x
+    // a Donchian-derived stop that can be 13% wide, so a ~26% move is
+    // needed to take profit and positions mostly just sit. If a future
+    // change to computeStopAndTarget makes targets reachable, this test
+    // starts failing, which is the signal to revisit DEFAULT_EXIT_POLICY.
+    const held = runBacktest(candles, null, "any", "1d", "stopAndTargetOnly");
+    const flipped = runBacktest(candles, null, "any", "1d", "flipOnSignal");
+    expect(held.trades.length).toBeLessThan(flipped.trades.length);
+    expect(held.trades.some((t) => t.exitReason === "target")).toBe(false);
+  });
+
+  it("applies the policy to the random baseline too, so the control stays a control", () => {
+    const flipped = runRandomBaseline(candles, 0.15, "seed", "1d", "flipOnSignal");
+    const held = runRandomBaseline(candles, 0.15, "seed", "1d", "stopAndTargetOnly");
+    expect(held.trades.some((t) => t.exitReason === "signal")).toBe(false);
+    expect(flipped.trades.length).not.toBe(held.trades.length);
+  });
+
+  it("carries the policy through the score backtest as well", () => {
+    const held = runScoreBacktest(candles, { exitPolicy: "stopAndTargetOnly" });
+    expect(held.trades.some((t) => t.exitReason === "signal")).toBe(false);
+  });
+});
+
 describe("alignExternalSeries", () => {
   const candles = makeCandles([100, 101, 102, 103, 104]); // t = 0, 86400, ...
   const DAY = 86400;
