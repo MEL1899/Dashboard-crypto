@@ -28,7 +28,9 @@ const NEUTRAL_INPUTS: ScoreMetricInputs = {
 
 /** Every metric pinned to its most bullish end, respecting each one's
  * direction: oversold RSI, price at the lower band, positive momentum,
- * undervalued on-chain, negative funding, coins leaving exchanges. */
+ * undervalued on-chain, negative funding, coins leaving exchanges — and
+ * extreme FEAR, since sentiment is read contrarian ("be greedy when others
+ * are fearful"). */
 const BULLISH_INPUTS: ScoreMetricInputs = {
   rsi: { "1h": 0, "4h": 0, "1d": 0 },
   bollingerPercentB: 0,
@@ -37,7 +39,7 @@ const BULLISH_INPUTS: ScoreMetricInputs = {
   mvrvZScore: -2,
   fundingRate: -0.05,
   exchangeNetflow: -3,
-  fearGreed: 100,
+  fearGreed: 0,
 };
 
 const BEARISH_INPUTS: ScoreMetricInputs = {
@@ -48,7 +50,7 @@ const BEARISH_INPUTS: ScoreMetricInputs = {
   mvrvZScore: 8,
   fundingRate: 0.05,
   exchangeNetflow: 3,
-  fearGreed: 0,
+  fearGreed: 100,
 };
 
 describe("normalizeMetric", () => {
@@ -245,8 +247,10 @@ describe("computeSignalScore", () => {
     expect(computeSignalScore({ fundingRate: 0.04 }).score).toBeLessThan(50);
     // Coins leaving exchanges = bullish.
     expect(computeSignalScore({ exchangeNetflow: -2 }).score).toBeGreaterThan(50);
-    // Fear & Greed is read at face value in v1: greed is bullish.
-    expect(computeSignalScore({ fearGreed: 90 }).score).toBeGreaterThan(50);
+    // Fear & Greed is read contrarian: extreme greed is the warning,
+    // extreme fear is the opportunity.
+    expect(computeSignalScore({ fearGreed: 90 }).score).toBeLessThan(50);
+    expect(computeSignalScore({ fearGreed: 10 }).score).toBeGreaterThan(50);
   });
 
   it("produces the same score for every regime in v1", () => {

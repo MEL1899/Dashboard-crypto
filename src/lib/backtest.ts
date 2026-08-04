@@ -4,12 +4,15 @@ import {
   calcBollingerBands,
   calcMACD,
   calcRSI,
+  calcSMA,
   isVolumeSpike,
   macdSignal,
   relativeStrengthSignal,
   trendSignal,
 } from "./indicators";
 import { computeOpportunityScore } from "./opportunityScore";
+import type { ScoreWeightConfig } from "./score/config";
+import { classifyScore as classifySignalScore, computeSignalScore } from "./score/signalScore";
 
 /** Why a trade closed: "stop"/"target" fired intraday off the position's own
  * SL/TP levels, "signal" means the opposite signal flipped the position
@@ -128,10 +131,66 @@ export const ROUND_TRIP_COST_PCT = (FEE_PCT_PER_LEG + SLIPPAGE_PCT_PER_LEG) * 2;
 /** "buy" opens/keeps a long, "sell" opens/keeps a short, "hold" leaves
  * whatever position (long, short, or flat) untouched. */
 type SignalAction = "buy" | "sell" | "hold";
-/** Decides what to do given every candle up to and including "today" (the
- * last element of `window`) — never anything past it, so a signal function
+
+/**
+ * Time series that can't be derived from OHLCV — Fear & Greed, MVRV,
+ * funding rate — keyed by metric id, each sorted ascending by time. They
+ * update on their own cadence (Fear & Greed is daily, funding every 8h),
+ * so they're aligned onto the candle timeline rather than assumed to match
+ * it one-for-one.
+ */
+export interface ExternalSeriesInput {
+  [metricId: string]: { time: number; value: number }[];
+}
+
+/** What a signal function gets to see on a given candle. */
+export interface SignalContext {
+  /** Every candle up to and including "today" — never anything past it. */
+  window: Candle[];
+  /** Each external series' most recent value at or before this candle's
+   * timestamp, or null if the series hadn't started yet. */
+  external: Record<string, number | null>;
+}
+
+/** Decides what to do from the current context — which by construction
+ * contains nothing dated after the current candle, so a signal function
  * can't accidentally peek into the future. */
-type SignalFn = (window: Candle[]) => SignalAction;
+type SignalFn = (ctx: SignalContext) => SignalAction;
+
+/**
+ * Projects each external series onto the candle timeline: for candle i, the
+ * last series value dated at or before candles[i].time.
+ *
+ * "At or before" is the whole no-lookahead guarantee for external data —
+ * a Fear & Greed reading published on the 5th must never be visible to the
+ * 4th's decision. Uses one forward-moving pointer per series rather than a
+ * search per candle, so aligning is linear in the total number of points
+ * instead of quadratic.
+ */
+export function alignExternalSeries(
+  candles: Candle[],
+  series: ExternalSeriesInput,
+): Record<string, number | null>[] {
+  const keys = Object.keys(series);
+  const sorted: Record<string, { time: number; value: number }[]> = {};
+  for (const key of keys) sorted[key] = [...series[key]].sort((a, b) => a.time - b.time);
+
+  const cursors: Record<string, number> = {};
+  for (const key of keys) cursors[key] = 0;
+
+  return candles.map((candle) => {
+    const row: Record<string, number | null> = {};
+    for (const key of keys) {
+      const points = sorted[key];
+      while (cursors[key] < points.length && points[cursors[key]].time <= candle.time) {
+        cursors[key]++;
+      }
+      // cursors[key] now sits one past the last usable point.
+      row[key] = cursors[key] > 0 ? points[cursors[key] - 1].value : null;
+    }
+    return row;
+  });
+}
 
 interface OpenPosition {
   type: "long" | "short";
@@ -217,8 +276,15 @@ function computeStopAndTarget(
  * runBacktest (the full score) and runRsiOnlyBacktest (RSI alone) are just
  * this loop with a different `signal`.
  */
-function simulate(candles: Candle[], signal: SignalFn, timeframe: BacktestTimeframe): BacktestResult {
+function simulate(
+  candles: Candle[],
+  signal: SignalFn,
+  timeframe: BacktestTimeframe,
+  external: ExternalSeriesInput = {},
+): BacktestResult {
   if (candles.length <= WARMUP_INDEX) return EMPTY_RESULT;
+
+  const alignedExternal = alignExternalSeries(candles, external);
 
   const trades: BacktestTrade[] = [];
   const equityCurve: BacktestPoint[] = [];
@@ -276,7 +342,7 @@ function simulate(candles: Candle[], signal: SignalFn, timeframe: BacktestTimefr
       }
     }
 
-    const action = signal(window);
+    const action = signal({ window, external: alignedExternal[i] });
     if (action === "buy" && position?.type !== "long") {
       if (position) recordTrade(position, time, lastClose, "signal");
       const { stopPrice, takeProfitPrice } = computeStopAndTarget("long", lastClose, window, timeframe);
@@ -366,7 +432,7 @@ export function runBacktest(
 ): BacktestResult {
   return simulate(
     candles,
-    (window) => {
+    ({ window }) => {
       const i = window.length - 1;
       const lastClose = window[i].close;
 
@@ -420,7 +486,7 @@ export function runRsiOnlyBacktest(
 ): BacktestResult {
   return simulate(
     candles,
-    (window) => {
+    ({ window }) => {
       const rsiSeries = calcRSI(window, rsiPeriod);
       if (rsiSeries.length === 0) return "hold";
       const rsi = rsiSeries[rsiSeries.length - 1].value;
@@ -489,5 +555,93 @@ export function runRandomBaseline(
       return rng() < 0.5 ? "buy" : "sell";
     },
     timeframe,
+  );
+}
+
+/** Bollinger %b: 0 = price at the lower band, 1 = at the upper. */
+function percentB(price: number, band: { upper: number; lower: number }): number | null {
+  const width = band.upper - band.lower;
+  if (width <= 0) return null;
+  return (price - band.lower) / width;
+}
+
+/**
+ * Backtests the layered opportunity score (lib/score) rather than the older
+ * inline one, so the new formula can be measured against the same random
+ * baseline that the old score failed.
+ *
+ * Two honest limitations, both structural rather than bugs:
+ *
+ *  - Only ONE timeframe's RSI is available, because the backtest replays a
+ *    single candle series. The multi-timeframe blend the live score uses
+ *    can't be reproduced here; the run's own timeframe fills its slot and
+ *    combineRsi renormalizes over what's present.
+ *  - On-chain metrics only participate if the caller supplies their history
+ *    in `external`. Without it the on-chain group drops out entirely and
+ *    the score is built from technical + sentiment, with `coverage`
+ *    reporting how much of the formula actually ran.
+ */
+export function runScoreBacktest(
+  candles: Candle[],
+  options: {
+    timeframe?: BacktestTimeframe;
+    mode?: BacktestMode;
+    /** Histories keyed by score metric id: "fearGreed", "mvrvZScore", … */
+    external?: ExternalSeriesInput;
+    /** Swaps the weight/direction config — used by the direction A/B. */
+    config?: ScoreWeightConfig;
+  } = {},
+): BacktestResult {
+  const { timeframe = "1d", mode = "any", external = {}, config } = options;
+
+  return simulate(
+    candles,
+    ({ window, external: ext }) => {
+      const i = window.length - 1;
+      const lastClose = window[i].close;
+
+      const rsiSeries = calcRSI(window);
+      const rsiValue = rsiSeries.length > 0 ? rsiSeries[rsiSeries.length - 1].value : null;
+
+      const bbSeries = calcBollingerBands(window);
+      const lastBb = bbSeries[bbSeries.length - 1];
+
+      const macdSeries = calcMACD(window);
+      const lastMacd = macdSeries[macdSeries.length - 1];
+
+      // Long-EMA proxy: the 50-period SMA the trend filter already uses,
+      // expressed as the price's distance from it in %.
+      const smaSeries = calcSMA(window, 50);
+      const lastSma = smaSeries[smaSeries.length - 1];
+
+      const { score } = computeSignalScore(
+        {
+          rsi: {
+            "1h": timeframe === "1h" ? rsiValue : null,
+            "4h": timeframe === "4h" ? rsiValue : null,
+            "1d": timeframe === "1d" ? rsiValue : null,
+          },
+          bollingerPercentB: lastBb ? percentB(lastClose, lastBb) : null,
+          macdHistogram: lastMacd ? (lastMacd.histogram / lastClose) * 100 : null,
+          emaDistance: lastSma ? ((lastClose - lastSma.value) / lastSma.value) * 100 : null,
+          mvrvZScore: ext.mvrvZScore,
+          fundingRate: ext.fundingRate,
+          exchangeNetflow: ext.exchangeNetflow,
+          fearGreed: ext.fearGreed,
+        },
+        "unknown",
+        config,
+      );
+
+      const level = classifySignalScore(score);
+      const isBuy = mode === "strongOnly" ? level === "strongBuy" : level === "buy" || level === "strongBuy";
+      const isSell = mode === "strongOnly" ? level === "strongSell" : level === "sell" || level === "strongSell";
+
+      if (isBuy) return "buy";
+      if (isSell) return "sell";
+      return "hold";
+    },
+    timeframe,
+    external,
   );
 }

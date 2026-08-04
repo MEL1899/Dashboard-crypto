@@ -163,8 +163,12 @@ function rawValueFor(
 export function computeSignalScore(
   inputs: ScoreMetricInputs,
   regime: MarketRegime = "unknown",
+  /** Overrides the regime's config outright. Used by the direction A/B
+   * harness, which needs two runs differing in exactly one metric's
+   * direction; production callers should leave it unset. */
+  configOverride?: ScoreWeightConfig,
 ): SignalScoreResult {
-  const config = configForRegime(regime);
+  const config = configOverride ?? configForRegime(regime);
 
   const groups: GroupContribution[] = config.groups.map((groupSpec) => {
     const present: { spec: MetricSpec; rawValue: number }[] = [];

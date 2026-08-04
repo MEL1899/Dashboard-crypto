@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   POSITION_SIZE_PCT,
   ROUND_TRIP_COST_PCT,
+  alignExternalSeries,
   runBacktest,
   runRandomBaseline,
   runRsiOnlyBacktest,
+  runScoreBacktest,
 } from "./backtest";
+import { configForRegime, withMetricDirection } from "./score/config";
 import type { Candle } from "../types";
 
 function makeCandles(closes: number[], startTime = 0, stepSeconds = 86400): Candle[] {
@@ -236,6 +239,145 @@ describe("runBacktest", () => {
     // are the same statement.
     if (result.winRate > result.breakevenWinRate) expect(result.expectancyPct).toBeGreaterThan(0);
     if (result.winRate < result.breakevenWinRate) expect(result.expectancyPct).toBeLessThan(0);
+  });
+});
+
+describe("alignExternalSeries", () => {
+  const candles = makeCandles([100, 101, 102, 103, 104]); // t = 0, 86400, ...
+  const DAY = 86400;
+
+  it("gives each candle the most recent value dated at or before it", () => {
+    const aligned = alignExternalSeries(candles, {
+      fng: [
+        { time: 0, value: 10 },
+        { time: 2 * DAY, value: 20 },
+        { time: 4 * DAY, value: 30 },
+      ],
+    });
+    // Candle 1 has no reading of its own, so it keeps day 0's.
+    expect(aligned.map((r) => r.fng)).toEqual([10, 10, 20, 20, 30]);
+  });
+
+  it("never lets a candle see a value published after it — the no-lookahead guarantee", () => {
+    const aligned = alignExternalSeries(candles, {
+      fng: [{ time: 3 * DAY, value: 99 }],
+    });
+    // Nothing before day 3 may know about it.
+    expect(aligned.map((r) => r.fng)).toEqual([null, null, null, 99, 99]);
+  });
+
+  it("returns null while a series hasn't started yet", () => {
+    const aligned = alignExternalSeries(candles, { fng: [{ time: 10 * DAY, value: 50 }] });
+    expect(aligned.every((r) => r.fng === null)).toBe(true);
+  });
+
+  it("sorts unsorted input rather than trusting the caller", () => {
+    const aligned = alignExternalSeries(candles, {
+      fng: [
+        { time: 4 * DAY, value: 30 },
+        { time: 0, value: 10 },
+        { time: 2 * DAY, value: 20 },
+      ],
+    });
+    expect(aligned.map((r) => r.fng)).toEqual([10, 10, 20, 20, 30]);
+  });
+
+  it("aligns several series independently, each on its own cadence", () => {
+    const aligned = alignExternalSeries(candles, {
+      daily: [
+        { time: 0, value: 1 },
+        { time: DAY, value: 2 },
+        { time: 2 * DAY, value: 3 },
+      ],
+      sparse: [{ time: 3 * DAY, value: 7 }],
+    });
+    expect(aligned.map((r) => r.daily)).toEqual([1, 2, 3, 3, 3]);
+    expect(aligned.map((r) => r.sparse)).toEqual([null, null, null, 7, 7]);
+  });
+
+  it("handles no series at all", () => {
+    expect(alignExternalSeries(candles, {})).toEqual([{}, {}, {}, {}, {}]);
+  });
+});
+
+describe("runScoreBacktest", () => {
+  const candles = makeCandles(syntheticSeries(200));
+  const DAY = 86400;
+
+  /** A Fear & Greed history covering the whole candle range. */
+  function fngSeries(valueAt: (i: number) => number) {
+    return candles.map((c, i) => ({ time: c.time, value: valueAt(i) }));
+  }
+
+  it("runs on technical metrics alone when no external series are given", () => {
+    const result = runScoreBacktest(candles);
+    expect(result.equityCurve.length).toBe(candles.length - 50);
+    for (const trade of result.trades) {
+      expect(["stop", "target", "signal", "end"]).toContain(trade.exitReason);
+    }
+  });
+
+  it("charges the same costs and honours the same stop bounds as the other strategies", () => {
+    const result = runScoreBacktest(candles, { timeframe: "1d" });
+    expect(result.totalCostPct).toBeCloseTo(result.trades.length * ROUND_TRIP_COST_PCT, 6);
+    for (const trade of result.trades) {
+      if (trade.exitReason === "stop") {
+        expect(Math.abs(trade.returnPct)).toBeLessThanOrEqual(15 + ROUND_TRIP_COST_PCT + 1e-6);
+      }
+    }
+  });
+
+  it("never looks ahead, same as the other strategies", () => {
+    const truncated = candles.slice(0, 120);
+    const external = { fearGreed: fngSeries((i) => (i % 100) / 2) };
+
+    const full = runScoreBacktest(candles, { external });
+    const partial = runScoreBacktest(truncated, { external });
+
+    const cutoff = truncated[truncated.length - 1].time;
+    expect(partial.trades.map((t) => t.entryTime)).toEqual(
+      full.trades.map((t) => t.entryTime).filter((t) => t <= cutoff),
+    );
+  });
+
+  it("actually consumes the external Fear & Greed series", () => {
+    // Pinned at extreme greed vs extreme fear: with the contrarian
+    // direction these are opposite sentiment readings, so the runs must
+    // diverge. If they matched, `external` wasn't reaching the score.
+    const greed = runScoreBacktest(candles, { external: { fearGreed: fngSeries(() => 95) } });
+    const fear = runScoreBacktest(candles, { external: { fearGreed: fngSeries(() => 5) } });
+    expect(greed.trades.map((t) => t.entryTime)).not.toEqual(fear.trades.map((t) => t.entryTime));
+  });
+
+  it("flipping the Fear & Greed direction changes the result, and only that", () => {
+    // The A/B the harness runs: same candles, same weights, one bit apart.
+    const external = { fearGreed: fngSeries(() => 90) };
+    const base = configForRegime();
+    const inverted = withMetricDirection(base, "fearGreed", "inverted");
+    const direct = withMetricDirection(base, "fearGreed", "direct");
+
+    const a = runScoreBacktest(candles, { external, config: inverted });
+    const b = runScoreBacktest(candles, { external, config: direct });
+    expect(a.strategyReturnPct).not.toBe(b.strategyReturnPct);
+
+    // Weights must be untouched by the flip.
+    expect(direct.groups.map((g) => g.weight)).toEqual(base.groups.map((g) => g.weight));
+    expect(inverted.groups[0].metrics.map((m) => m.weight)).toEqual(
+      base.groups[0].metrics.map((m) => m.weight),
+    );
+  });
+
+  it("ignores an external series that ends before the simulation starts", () => {
+    const stale = { fearGreed: [{ time: -10 * DAY, value: 50 }] };
+    const result = runScoreBacktest(candles, { external: stale });
+    expect(result.equityCurve.length).toBe(candles.length - 50);
+  });
+
+  it("'strongOnly' mode trades no more often than the default", () => {
+    const external = { fearGreed: fngSeries((i) => (i * 7) % 100) };
+    const any = runScoreBacktest(candles, { external, mode: "any" });
+    const strong = runScoreBacktest(candles, { external, mode: "strongOnly" });
+    expect(strong.trades.length).toBeLessThanOrEqual(any.trades.length);
   });
 });
 

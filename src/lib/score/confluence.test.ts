@@ -72,7 +72,8 @@ describe("evaluateConfluence", () => {
       mvrvZScore: 8,
       fundingRate: 0.05,
       exchangeNetflow: 3,
-      fearGreed: 0,
+      // Contrarian reading, so extreme greed is the bearish sentiment end.
+      fearGreed: 100,
     });
     const confluence = evaluateConfluence(result.groups);
 

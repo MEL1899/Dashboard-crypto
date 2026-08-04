@@ -177,6 +177,36 @@ const ONCHAIN: GroupSpec = {
  * 10%, Google Trends 10%). Re-implementing that formula ourselves only
  * makes sense if we later want to customize those weights.
  */
+/*
+ * TODO (só depois de validar com dado real no backtest): a inversão linear
+ * do Fear & Greed provavelmente não é a curva ideal de mapeamento.
+ *
+ * Uma análise de mercado (NÃO é paper acadêmico — tratar como hipótese, não
+ * como fato estabelecido) comparou retorno histórico por faixa do índice
+ * separando Bitcoin de altcoins e encontrou um padrão que a inversão linear
+ * não captura:
+ *
+ *   - Bitcoin teve os melhores retornos na faixa NEUTRA do índice, não em
+ *     Medo Extremo. Sob inversão linear, medo extremo (F&G 5) vira nota 95
+ *     — a nota mais alta possível — o que contraria esse achado.
+ *   - Altcoins tiveram os melhores retornos em Ganância Extrema, ou seja,
+ *     comportamento de momentum e não de reversão — sugerindo que a direção
+ *     correta pode até depender da classe do ativo.
+ *
+ * Se o padrão se confirmar, o mapeamento certo pra BTC seria um U invertido
+ * (neutro pontuando acima dos dois extremos) em vez de uma reta descendente,
+ * e possivelmente uma direção diferente para altcoins. Implementar isso
+ * exigiria trocar `direction` por uma função de mapeamento por métrica, o
+ * que a estrutura atual comporta.
+ *
+ * NÃO implementar antes de medir: o harness em scripts/fng-direction-ab.ts
+ * roda direto vs. invertido contra o baseline aleatório e é ele que deve
+ * decidir, não o racional acima.
+ *
+ * Fonte: "How Crypto Investors Misinterpret Warren Buffett's Advice on Fear
+ * and Greed" (CCN, análise de mercado)
+ * https://www.ccn.com/analysis/business/warren-buffetts-fear-and-greed-strategy-in-crypto/
+ */
 const SENTIMENT: GroupSpec = {
   id: "sentiment",
   label: "Sentimento",
@@ -186,16 +216,20 @@ const SENTIMENT: GroupSpec = {
       id: "fearGreed",
       label: "Fear & Greed Index",
       weight: 1,
-      // Taken at face value: greed reads bullish, fear reads bearish. Note
-      // this is the momentum reading — the contrarian convention ("be
-      // greedy when others are fearful") would flip it to "inverted", which
-      // would also line it up with the mean-reversion direction used in the
-      // technical group. Left "direct" because that is how the index is
-      // published and read; flip here to test the contrarian version.
-      direction: "direct",
+      // Contrarian reading: extreme greed is the warning, extreme fear is
+      // the opportunity. "Be greedy when others are fearful" is literally
+      // why the index was created, and it lines sentiment up with the
+      // mean-reversion direction already used by RSI, Bollinger and MVRV —
+      // the whole score is a contrarian system, and reading sentiment as
+      // momentum was the one piece that broke the pattern. Left as
+      // "direct" it also produced a structural contradiction: at a
+      // euphoric top the technical group read ~35 (sell) while sentiment
+      // read 90 (buy), muting the score at exactly the moment it should
+      // speak loudest.
+      direction: "inverted",
       clip: { min: 0, max: 100 },
       rationale:
-        "Índice pronto da Alternative.me (0 = medo extremo, 100 = ganância extrema), usado como o grupo inteiro na v1. É o único índice composto da indústria que publica componentes e pesos exatos.",
+        "Índice pronto da Alternative.me (0 = medo extremo, 100 = ganância extrema), usado como o grupo inteiro na v1, com leitura contrária: ganância extrema vira nota baixa, medo extremo vira nota alta. É o único índice composto da indústria que publica componentes e pesos exatos.",
     },
   ],
 };
@@ -217,6 +251,17 @@ export interface ScoreWeightConfig {
  * config below. The plumbing exists so that turning it on later is a data
  * change in WEIGHTS_BY_REGIME, not a change to any scoring function.
  */
+/*
+ * PRÓXIMO ITEM (só depois do A/B do F&G — não implementar antes):
+ * detecção de regime via ADX ou inclinação da EMA de 200 períodos.
+ *
+ * É a camada de regime, e não o ajuste fino de pesos entre grupos, que
+ * resolve de verdade o risco de "faca caindo" — o sistema é contrário em
+ * todos os três grupos (RSI/Bollinger, MVRV e agora F&G), e um sistema
+ * contrário puro compra cedo demais em bear market forte. Saber que o
+ * regime é de baixa é o que permite exigir mais convicção antes de comprar
+ * o repique, em vez de tentar compensar isso com peso.
+ */
 export type MarketRegime = "uptrend" | "downtrend" | "range" | "unknown";
 
 const BASE_CONFIG: ScoreWeightConfig = {
@@ -234,6 +279,28 @@ export const WEIGHTS_BY_REGIME: Record<MarketRegime, ScoreWeightConfig> = {
 
 export function configForRegime(regime: MarketRegime = "unknown"): ScoreWeightConfig {
   return WEIGHTS_BY_REGIME[regime];
+}
+
+/**
+ * Returns a copy of `config` with one metric's direction flipped, leaving
+ * every weight untouched. Built for the Fear & Greed direct-vs-inverted A/B
+ * (scripts/fng-direction-ab.ts): the two arms have to differ in exactly one
+ * bit, or the comparison measures something other than the direction.
+ */
+export function withMetricDirection(
+  config: ScoreWeightConfig,
+  metricId: string,
+  direction: MetricDirection,
+): ScoreWeightConfig {
+  return {
+    ...config,
+    groups: config.groups.map((group) => ({
+      ...group,
+      metrics: group.metrics.map((metric) =>
+        metric.id === metricId ? { ...metric, direction } : metric,
+      ),
+    })),
+  };
 }
 
 /** Confluence thresholds (Layer 2). A group above HIGH is read as bullish,

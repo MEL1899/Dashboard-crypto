@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test": "vitest run",
+    "ab:fng": "vite-node scripts/fng-direction-ab.ts",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -28,6 +29,7 @@
     "oxlint": "^1.71.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
+    "vite-node": "^6.0.0",
     "vitest": "^4.1.10"
   }
 }
