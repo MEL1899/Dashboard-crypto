@@ -9,6 +9,7 @@
     "lint": "oxlint",
     "test": "vitest run",
     "ab:fng": "vite-node scripts/fng-direction-ab.ts",
+    "ab:exit": "vite-node scripts/exit-policy-ab.ts",
     "preview": "vite preview"
   },
   "dependencies": {

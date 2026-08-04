@@ -283,6 +283,75 @@ describe("exit policy", () => {
   });
 });
 
+describe("trailing stop", () => {
+  const candles = makeCandles(syntheticSeries(600));
+  const TRAIL = { activationR: 1, trailFactor: 1 };
+
+  it("a trailing-stop exit can never lose money — the whole point of a 'stop positivo'", () => {
+    // Once active the stop sits at entry + the round-trip cost or better,
+    // so exiting on it is break-even at worst. This is the strongest
+    // guarantee the trailing rule provides, and it holds by construction.
+    const result = runBacktest(candles, null, "any", "1d", "flipOnSignal", TRAIL);
+    const trailed = result.trades.filter((t) => t.exitReason === "trail");
+    expect(trailed.length).toBeGreaterThan(0);
+    for (const trade of trailed) {
+      expect(trade.returnPct).toBeGreaterThanOrEqual(-1e-6);
+    }
+  });
+
+  it("labels a trailed exit separately from an original-stop exit", () => {
+    const result = runBacktest(candles, null, "any", "1d", "flipOnSignal", TRAIL);
+    expect(result.trades.some((t) => t.exitReason === "trail")).toBe(true);
+    // Plain stops must still exist — trades stopped out before the trail
+    // ever activated.
+    expect(result.trades.some((t) => t.exitReason === "stop")).toBe(true);
+  });
+
+  it("produces no trailed exits at all when trailing is disabled", () => {
+    const result = runBacktest(candles, null, "any", "1d", "flipOnSignal", null);
+    expect(result.trades.some((t) => t.exitReason === "trail")).toBe(false);
+  });
+
+  it("improves the reward-to-risk ratio, which is what it exists to do", () => {
+    const withoutTrail = runBacktest(candles, null, "any", "1d", "flipOnSignal", null);
+    const withTrail = runBacktest(candles, null, "any", "1d", "flipOnSignal", TRAIL);
+
+    const ratio = (r: typeof withTrail) => {
+      const wins = r.trades.filter((t) => t.returnPct > 0);
+      const losses = r.trades.filter((t) => t.returnPct <= 0);
+      if (wins.length === 0 || losses.length === 0) return null;
+      const avgWin = wins.reduce((s, t) => s + t.returnPct, 0) / wins.length;
+      const avgLoss = Math.abs(losses.reduce((s, t) => s + t.returnPct, 0) / losses.length);
+      return avgWin / avgLoss;
+    };
+
+    const before = ratio(withoutTrail);
+    const after = ratio(withTrail);
+    expect(before).not.toBeNull();
+    expect(after).not.toBeNull();
+    expect(after as number).toBeGreaterThan(before as number);
+    // And the win rate it needs to break even falls accordingly.
+    expect(withTrail.breakevenWinRate).toBeLessThan(withoutTrail.breakevenWinRate);
+  });
+
+  it("a later activation threshold trails less often", () => {
+    const eager = runBacktest(candles, null, "any", "1d", "flipOnSignal", { activationR: 1, trailFactor: 1 });
+    const patient = runBacktest(candles, null, "any", "1d", "flipOnSignal", { activationR: 3, trailFactor: 1 });
+    const count = (r: typeof eager) => r.trades.filter((t) => t.exitReason === "trail").length;
+    expect(count(patient)).toBeLessThanOrEqual(count(eager));
+  });
+
+  it("does not rescue 'stopAndTargetOnly' from its low trade count", () => {
+    // Documents a measured limitation: the trail activates at 1R, and R is
+    // the same Donchian-derived stop that can be 13% wide, so activation is
+    // about as unreachable as the target was. Trailing is not a fix for the
+    // stop being too wide.
+    const held = runBacktest(candles, null, "any", "1d", "stopAndTargetOnly", TRAIL);
+    const flipped = runBacktest(candles, null, "any", "1d", "flipOnSignal", TRAIL);
+    expect(held.trades.length).toBeLessThan(flipped.trades.length / 2);
+  });
+});
+
 describe("alignExternalSeries", () => {
   const candles = makeCandles([100, 101, 102, 103, 104]); // t = 0, 86400, ...
   const DAY = 86400;

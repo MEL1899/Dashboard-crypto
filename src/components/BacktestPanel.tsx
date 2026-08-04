@@ -51,6 +51,7 @@ function StatTile({
 
 const EXIT_REASON_LABEL: Record<ExitReason, string> = {
   stop: "Stop",
+  trail: "Stop móvel",
   target: "Alvo",
   signal: "Sinal",
   end: "Fim do período",

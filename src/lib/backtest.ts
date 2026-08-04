@@ -17,7 +17,7 @@ import { classifyScore as classifySignalScore, computeSignalScore } from "./scor
 /** Why a trade closed: "stop"/"target" fired intraday off the position's own
  * SL/TP levels, "signal" means the opposite signal flipped the position
  * first, "end" means it was still open when the simulated window ran out. */
-export type ExitReason = "stop" | "target" | "signal" | "end";
+export type ExitReason = "stop" | "trail" | "target" | "signal" | "end";
 
 export interface BacktestTrade {
   type: "long" | "short";
@@ -155,6 +155,29 @@ export type ExitPolicy = "stopAndTargetOnly" | "flipOnSignal";
 
 export const DEFAULT_EXIT_POLICY: ExitPolicy = "flipOnSignal";
 
+/**
+ * Trailing stop: once a trade has moved far enough in your favour, the stop
+ * follows the price instead of staying where it started, so a winner can
+ * keep running while its downside keeps shrinking.
+ *
+ * This is what makes an exit rule work without relying on a distant target.
+ * With `activationR: 1` and `trailFactor: 1` the stop reaches break-even
+ * exactly when the trade is up 1R, and rises past it from there — the
+ * "stop positivo" that turns a good trade into one that can no longer lose.
+ *
+ * The stop only ever tightens, never loosens: giving a trade back room it
+ * already earned is how a winner becomes a loser.
+ */
+export interface TrailingStopConfig {
+  /** Favourable movement, in multiples of the initial stop distance (R),
+   * required before the stop starts moving at all. */
+  activationR: number;
+  /** Once active, the stop trails this many R behind the best price seen. */
+  trailFactor: number;
+}
+
+export const DEFAULT_TRAILING_STOP: TrailingStopConfig = { activationR: 1, trailFactor: 1 };
+
 // Real trading isn't free, and pretending it is flatters short-horizon
 // strategies enormously: a rule that trades every other candle can look
 // profitable gross and still bleed to death on fees. Charged per leg, so a
@@ -237,8 +260,44 @@ interface OpenPosition {
   type: "long" | "short";
   entryTime: number;
   entryPrice: number;
+  /** Moves as the trailing stop tightens; never loosens. */
   stopPrice: number;
   takeProfitPrice: number;
+  /** Distance from entry to the ORIGINAL stop — one "R", the unit the
+   * trailing rule is expressed in. Kept separate because stopPrice moves. */
+  initialRisk: number;
+  /** Best price seen in the trade's favour since entry. */
+  bestPrice: number;
+  /** True once the trailing stop has moved at least once, so a resulting
+   * exit can be reported as "trail" rather than "stop". */
+  trailing: boolean;
+}
+
+/**
+ * The stop's new location given the best price reached so far, or null if
+ * it shouldn't move yet. Returns a tightened stop only — the caller keeps
+ * the old one whenever this would give room back.
+ *
+ * The cost buffer is what makes the "stop positivo" genuinely positive: a
+ * stop exactly at the entry price still loses the round-trip fee, so
+ * break-even is placed just past it.
+ */
+function trailingStopPrice(position: OpenPosition, trail: TrailingStopConfig): number | null {
+  const { entryPrice, initialRisk, bestPrice, type } = position;
+  if (initialRisk <= 0) return null;
+
+  const progressR = type === "long" ? (bestPrice - entryPrice) / initialRisk : (entryPrice - bestPrice) / initialRisk;
+  if (progressR < trail.activationR) return null;
+
+  const costBuffer = entryPrice * (ROUND_TRIP_COST_PCT / 100);
+  const candidate =
+    type === "long"
+      ? Math.max(bestPrice - trail.trailFactor * initialRisk, entryPrice + costBuffer)
+      : Math.min(bestPrice + trail.trailFactor * initialRisk, entryPrice - costBuffer);
+
+  // Tighten only.
+  if (type === "long") return candidate > position.stopPrice ? candidate : null;
+  return candidate < position.stopPrice ? candidate : null;
 }
 
 /** % return of one position at a given price — long profits as price rises,
@@ -323,6 +382,8 @@ function simulate(
   timeframe: BacktestTimeframe,
   external: ExternalSeriesInput = {},
   exitPolicy: ExitPolicy = DEFAULT_EXIT_POLICY,
+  /** null disables trailing entirely (the original fixed-stop behaviour). */
+  trailingStop: TrailingStopConfig | null = null,
 ): BacktestResult {
   if (candles.length <= WARMUP_INDEX) return EMPTY_RESULT;
 
@@ -376,11 +437,29 @@ function simulate(
       const targetHit =
         position.type === "long" ? today.high >= position.takeProfitPrice : today.low <= position.takeProfitPrice;
       if (stopped) {
-        recordTrade(position, time, position.stopPrice, "stop");
+        // A stop that has already trailed is reported separately: exiting
+        // at a stop dragged into profit is a different outcome from being
+        // stopped out at the original risk, and lumping them together
+        // would hide the trailing rule's whole contribution.
+        recordTrade(position, time, position.stopPrice, position.trailing ? "trail" : "stop");
         position = null;
       } else if (targetHit) {
         recordTrade(position, time, position.takeProfitPrice, "target");
         position = null;
+      }
+    }
+
+    // Only now — after this candle's stop check used the level the position
+    // came in with — does the trail move, taking effect from the next
+    // candle on. Updating it first would quietly assume the favourable
+    // extreme happened before the adverse one within the same bar.
+    if (position && trailingStop) {
+      position.bestPrice =
+        position.type === "long" ? Math.max(position.bestPrice, today.high) : Math.min(position.bestPrice, today.low);
+      const tightened = trailingStopPrice(position, trailingStop);
+      if (tightened !== null) {
+        position.stopPrice = tightened;
+        position.trailing = true;
       }
     }
 
@@ -396,11 +475,29 @@ function simulate(
     if (canAct && action === "buy" && position?.type !== "long") {
       if (position) recordTrade(position, time, lastClose, "signal");
       const { stopPrice, takeProfitPrice } = computeStopAndTarget("long", lastClose, window, timeframe);
-      position = { type: "long", entryTime: time, entryPrice: lastClose, stopPrice, takeProfitPrice };
+      position = {
+        type: "long",
+        entryTime: time,
+        entryPrice: lastClose,
+        stopPrice,
+        takeProfitPrice,
+        initialRisk: lastClose - stopPrice,
+        bestPrice: lastClose,
+        trailing: false,
+      };
     } else if (canAct && action === "sell" && position?.type !== "short") {
       if (position) recordTrade(position, time, lastClose, "signal");
       const { stopPrice, takeProfitPrice } = computeStopAndTarget("short", lastClose, window, timeframe);
-      position = { type: "short", entryTime: time, entryPrice: lastClose, stopPrice, takeProfitPrice };
+      position = {
+        type: "short",
+        entryTime: time,
+        entryPrice: lastClose,
+        stopPrice,
+        takeProfitPrice,
+        initialRisk: stopPrice - lastClose,
+        bestPrice: lastClose,
+        trailing: false,
+      };
     }
 
     equityCurve.push({
@@ -480,6 +577,7 @@ export function runBacktest(
   mode: BacktestMode = "any",
   timeframe: BacktestTimeframe = "1d",
   exitPolicy: ExitPolicy = DEFAULT_EXIT_POLICY,
+  trailingStop: TrailingStopConfig | null = null,
 ): BacktestResult {
   return simulate(
     candles,
@@ -517,6 +615,7 @@ export function runBacktest(
     timeframe,
     {},
     exitPolicy,
+    trailingStop,
   );
 }
 
@@ -653,6 +752,7 @@ export function runScoreBacktest(
     /** Swaps the weight/direction config — used by the direction A/B. */
     config?: ScoreWeightConfig;
     exitPolicy?: ExitPolicy;
+    trailingStop?: TrailingStopConfig | null;
   } = {},
 ): BacktestResult {
   const {
@@ -661,6 +761,7 @@ export function runScoreBacktest(
     external = {},
     config,
     exitPolicy = DEFAULT_EXIT_POLICY,
+    trailingStop = null,
   } = options;
 
   return simulate(
@@ -713,5 +814,6 @@ export function runScoreBacktest(
     timeframe,
     external,
     exitPolicy,
+    trailingStop,
   );
 }
