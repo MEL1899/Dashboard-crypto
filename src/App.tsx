@@ -38,8 +38,8 @@ const WalletPanel = lazy(() =>
 const BacktestPanel = lazy(() =>
   import("./components/BacktestPanel").then((m) => ({ default: m.BacktestPanel })),
 );
-const ScoreMethodologyPanel = lazy(() =>
-  import("./components/ScoreMethodologyPanel").then((m) => ({ default: m.ScoreMethodologyPanel })),
+const LiveScorePanel = lazy(() =>
+  import("./components/LiveScorePanel").then((m) => ({ default: m.LiveScorePanel })),
 );
 const RiskGuidancePanel = lazy(() =>
   import("./components/RiskGuidancePanel").then((m) => ({ default: m.RiskGuidancePanel })),
@@ -67,6 +67,9 @@ function App() {
   const [settings, setSettings] = useState(loadSettings());
   const { theme, toggleTheme } = useTheme();
   const [tab, setTab] = useState<Tab>("market");
+  // Which token the Score tab is reading. Kept here rather than inside the
+  // lazy panel so the choice survives tab switches.
+  const [scoreTokenId, setScoreTokenId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [watchlist, setWatchlist] = useState<string[]>(settings.watchlist);
   const [portfolio, setPortfolio] = useState<string[]>(settings.portfolio);
@@ -383,16 +386,19 @@ function App() {
         ) : (
           <Suspense fallback={<TabFallback />}>
             <div className="flex flex-col gap-4">
-              {/* The new layered score isn't wired to live data yet, so the
-                  methodology panel renders in documentation-only mode. Once
-                  a real reading exists, passing it as `result` fills in each
-                  metric's current value with no change here. */}
               <div className="rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-3 py-2 text-xs text-[var(--color-text)]">
-                O novo score em camadas ainda não está ligado às fontes de dados — abaixo está a
-                fórmula documentada e a calculadora de risco, ambas já funcionais. O selo em uso na
-                aba Mercado continua sendo o score antigo.
+                O score em camadas roda com dado real de mercado e sentimento; o grupo on-chain
+                ainda não está conectado, então a cobertura fica abaixo de 100%. O selo da aba
+                Mercado continua sendo o score antigo até este ser validado.
               </div>
-              <ScoreMethodologyPanel />
+              <LiveScorePanel
+                tokens={watchlistTokens.tokens}
+                // Falls back to the first watchlist token so the tab shows a
+                // real reading immediately instead of an empty selector.
+                selectedTokenId={scoreTokenId ?? watchlistTokens.tokens[0]?.id ?? null}
+                onSelectToken={setScoreTokenId}
+                apiKey={settings.coingeckoApiKey || undefined}
+              />
               <RiskGuidancePanel currency={MERCADO_CURRENCY} />
             </div>
           </Suspense>

@@ -86,6 +86,42 @@ function calcEMASeries(values: number[], period: number): number[] {
   return out;
 }
 
+/** Last EMA value of the closing series, or null without enough candles to
+ * let the average settle (the seed is just the first close, so a short
+ * series would mostly report that seed back). */
+export function calcEMA(candles: Candle[], period: number): number | null {
+  if (candles.length < period) return null;
+  const series = calcEMASeries(
+    candles.map((c) => c.close),
+    period,
+  );
+  return series[series.length - 1];
+}
+
+/**
+ * How far the latest close sits from its long EMA, in % of the EMA —
+ * positive above, negative below. Scale-free, so the reading means the same
+ * on any asset.
+ *
+ * Shared by the live score and the backtest on purpose: if one measured
+ * distance-to-EMA and the other distance-to-SMA, the score being backtested
+ * would not be the score being displayed.
+ */
+export function emaDistancePct(candles: Candle[], period: number): number | null {
+  const ema = calcEMA(candles, period);
+  if (ema === null || ema === 0) return null;
+  const lastClose = candles[candles.length - 1].close;
+  return ((lastClose - ema) / ema) * 100;
+}
+
+/** Bollinger %b — 0 = price at the lower band, 1 = at the upper. Null when
+ * the bands have collapsed to a single line and position is undefined. */
+export function bollingerPercentB(price: number, band: { upper: number; lower: number }): number | null {
+  const width = band.upper - band.lower;
+  if (width <= 0) return null;
+  return (price - band.lower) / width;
+}
+
 /**
  * MACD (12/26 EMA difference, 9-period EMA signal line) — the classic
  * momentum companion to RSI: RSI flags "stretched", MACD flags whether
