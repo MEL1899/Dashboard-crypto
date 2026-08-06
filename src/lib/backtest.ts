@@ -62,6 +62,11 @@ export interface BacktestResult {
   /** Total round-trip cost (fees + slippage) charged across all trades, in
    * % of the traded position — how much of the result the exchange ate. */
   totalCostPct: number;
+  /** Signals declined for offering too little reward for their risk. Always
+   * 0 unless the reward-to-risk entry filter is on. Makes a thin run
+   * legible: few trades because the filter rejected most setups is a very
+   * different story from few trades because the signal rarely fired. */
+  rejectedEntries: number;
 }
 
 const EMPTY_RESULT: BacktestResult = {
@@ -74,6 +79,7 @@ const EMPTY_RESULT: BacktestResult = {
   expectancyPct: 0,
   breakevenWinRate: 0,
   totalCostPct: 0,
+  rejectedEntries: 0,
 };
 
 /** Candle granularity the backtest can run on — a subset of the app's full
@@ -342,25 +348,55 @@ function computeStopAndTarget(
   entryPrice: number,
   window: Candle[],
   timeframe: BacktestTimeframe,
-): { stopPrice: number; takeProfitPrice: number } {
+  /**
+   * When true the target is placed at the real support/resistance level and
+   * the setup is REJECTED (null) if that level is closer than
+   * MIN_REWARD_RISK_RATIO times the stop. When false the legacy behaviour
+   * applies: the target is stretched to whichever is further, the level or
+   * the ratio, and no setup is ever rejected.
+   *
+   * OFF BY DEFAULT, and measurement is why. This filter was written to fix
+   * the unreachable-target problem and measured far worse than what it
+   * replaced: on a 600-candle synthetic series it rejected 245 of ~259
+   * signals and the 14 that passed produced a 0% win rate and -19.9%,
+   * against +17.4% for the stretched target.
+   *
+   * The mechanism is worth understanding before anyone tries this again.
+   * Requiring reward >= 2x risk is easiest to satisfy when the risk is
+   * SMALL, so the filter systematically selects the setups with the
+   * tightest stops — and after the [3%, 15%] clamp, a "tight" stop is one
+   * sitting 3% away, which ordinary noise takes out almost immediately.
+   * An unguarded reward-to-risk filter is not a quality filter; it is a
+   * tight-stop filter, and tight stops are the ones noise kills.
+   */
+  requireMinRewardRisk = false,
+): { stopPrice: number; takeProfitPrice: number } | null {
   const { support, resistance } = supportResistance(window);
   const bounds = STOP_BOUNDS_PCT[timeframe];
   const minStopDistance = (entryPrice * bounds.min) / 100;
   const maxStopDistance = (entryPrice * bounds.max) / 100;
 
-  if (type === "long") {
-    const rawStopDistance = entryPrice - support;
-    const stopDistance = clamp(rawStopDistance > 0 ? rawStopDistance : minStopDistance, minStopDistance, maxStopDistance);
-    const rawTargetDistance = resistance - entryPrice;
-    const targetDistance = Math.max(rawTargetDistance > 0 ? rawTargetDistance : 0, stopDistance * MIN_REWARD_RISK_RATIO);
-    return { stopPrice: entryPrice - stopDistance, takeProfitPrice: entryPrice + targetDistance };
+  const towardStop = type === "long" ? entryPrice - support : resistance - entryPrice;
+  const towardTarget = type === "long" ? resistance - entryPrice : entryPrice - support;
+
+  const stopDistance = clamp(towardStop > 0 ? towardStop : minStopDistance, minStopDistance, maxStopDistance);
+
+  let targetDistance: number;
+  if (requireMinRewardRisk) {
+    // Target the level that actually exists. If price would have to travel
+    // further to pay than it risks losing by the required multiple, this
+    // simply isn't a setup worth taking — decline it rather than moving the
+    // goalposts to a price the market never reaches.
+    if (towardTarget <= 0) return null;
+    if (towardTarget < stopDistance * MIN_REWARD_RISK_RATIO) return null;
+    targetDistance = towardTarget;
+  } else {
+    targetDistance = Math.max(towardTarget > 0 ? towardTarget : 0, stopDistance * MIN_REWARD_RISK_RATIO);
   }
 
-  const rawStopDistance = resistance - entryPrice;
-  const stopDistance = clamp(rawStopDistance > 0 ? rawStopDistance : minStopDistance, minStopDistance, maxStopDistance);
-  const rawTargetDistance = entryPrice - support;
-  const targetDistance = Math.max(rawTargetDistance > 0 ? rawTargetDistance : 0, stopDistance * MIN_REWARD_RISK_RATIO);
-  return { stopPrice: entryPrice + stopDistance, takeProfitPrice: entryPrice - targetDistance };
+  return type === "long"
+    ? { stopPrice: entryPrice - stopDistance, takeProfitPrice: entryPrice + targetDistance }
+    : { stopPrice: entryPrice + stopDistance, takeProfitPrice: entryPrice - targetDistance };
 }
 
 /**
@@ -384,8 +420,16 @@ function simulate(
   exitPolicy: ExitPolicy = DEFAULT_EXIT_POLICY,
   /** null disables trailing entirely (the original fixed-stop behaviour). */
   trailingStop: TrailingStopConfig | null = null,
+  /** Turns the minimum reward-to-risk into an entry filter instead of a
+   * target stretcher — see computeStopAndTarget. */
+  requireMinRewardRisk = false,
 ): BacktestResult {
   if (candles.length <= WARMUP_INDEX) return EMPTY_RESULT;
+
+  // How many signals were declined for offering too little reward for their
+  // risk. Reported so a run that barely trades is legible as "the filter is
+  // too strict" rather than "the signal never fired".
+  let rejectedEntries = 0;
 
   const alignedExternal = alignExternalSeries(candles, external);
 
@@ -469,35 +513,41 @@ function simulate(
     // what the signal says — only the stop, the target or the end of the
     // window can close it. Under "flipOnSignal" the opposite signal closes
     // it at market and reverses. See ExitPolicy for why the default moved.
-    const signalMayClose = exitPolicy === "flipOnSignal";
-    const canAct = position === null || signalMayClose;
+    // These locals are annotated, and `side` is derived from the signal
+    // rather than from the open position, purely to keep TypeScript's
+    // control-flow analysis out of a cycle: `position` is reassigned a few
+    // lines down, so any expression that both reads it and feeds that
+    // assignment makes its type unresolvable (TS7022 / never).
+    const current: OpenPosition | null = position;
+    const signalMayClose: boolean = exitPolicy === "flipOnSignal";
+    const canAct: boolean = current === null || signalMayClose;
+    const side: "long" | "short" | null =
+      action === "buy" ? "long" : action === "sell" ? "short" : null;
 
-    if (canAct && action === "buy" && position?.type !== "long") {
-      if (position) recordTrade(position, time, lastClose, "signal");
-      const { stopPrice, takeProfitPrice } = computeStopAndTarget("long", lastClose, window, timeframe);
-      position = {
-        type: "long",
-        entryTime: time,
-        entryPrice: lastClose,
-        stopPrice,
-        takeProfitPrice,
-        initialRisk: lastClose - stopPrice,
-        bestPrice: lastClose,
-        trailing: false,
-      };
-    } else if (canAct && action === "sell" && position?.type !== "short") {
-      if (position) recordTrade(position, time, lastClose, "signal");
-      const { stopPrice, takeProfitPrice } = computeStopAndTarget("short", lastClose, window, timeframe);
-      position = {
-        type: "short",
-        entryTime: time,
-        entryPrice: lastClose,
-        stopPrice,
-        takeProfitPrice,
-        initialRisk: stopPrice - lastClose,
-        bestPrice: lastClose,
-        trailing: false,
-      };
+    if (side !== null && canAct && current?.type !== side) {
+      const levels = computeStopAndTarget(side, lastClose, window, timeframe, requireMinRewardRisk);
+      // A rejected setup leaves any existing position exactly as it was:
+      // declining a new trade is not a reason to abandon a live one.
+      if (levels) {
+        if (current) recordTrade(current, time, lastClose, "signal");
+        const { stopPrice, takeProfitPrice } = levels;
+        // Annotated rather than inferred: letting TypeScript derive this
+        // literal's type from `position` is what closes the cycle that
+        // collapses `position` to never.
+        const opened: OpenPosition = {
+          type: side,
+          entryTime: time,
+          entryPrice: lastClose,
+          stopPrice,
+          takeProfitPrice,
+          initialRisk: side === "long" ? lastClose - stopPrice : stopPrice - lastClose,
+          bestPrice: lastClose,
+          trailing: false,
+        };
+        position = opened;
+      } else {
+        rejectedEntries++;
+      }
     }
 
     equityCurve.push({
@@ -544,6 +594,7 @@ function simulate(
     expectancyPct: trades.length > 0 ? trades.reduce((s, t) => s + t.returnPct, 0) / trades.length : 0,
     breakevenWinRate,
     totalCostPct: trades.length * ROUND_TRIP_COST_PCT,
+    rejectedEntries,
   };
 }
 
@@ -578,6 +629,7 @@ export function runBacktest(
   timeframe: BacktestTimeframe = "1d",
   exitPolicy: ExitPolicy = DEFAULT_EXIT_POLICY,
   trailingStop: TrailingStopConfig | null = null,
+  requireMinRewardRisk = false,
 ): BacktestResult {
   return simulate(
     candles,
@@ -616,6 +668,7 @@ export function runBacktest(
     {},
     exitPolicy,
     trailingStop,
+    requireMinRewardRisk,
   );
 }
 
@@ -753,6 +806,7 @@ export function runScoreBacktest(
     config?: ScoreWeightConfig;
     exitPolicy?: ExitPolicy;
     trailingStop?: TrailingStopConfig | null;
+    requireMinRewardRisk?: boolean;
   } = {},
 ): BacktestResult {
   const {
@@ -762,6 +816,7 @@ export function runScoreBacktest(
     config,
     exitPolicy = DEFAULT_EXIT_POLICY,
     trailingStop = null,
+    requireMinRewardRisk = false,
   } = options;
 
   return simulate(
@@ -815,5 +870,6 @@ export function runScoreBacktest(
     external,
     exitPolicy,
     trailingStop,
+    requireMinRewardRisk,
   );
 }

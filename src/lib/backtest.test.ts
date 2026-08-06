@@ -49,6 +49,7 @@ describe("runBacktest", () => {
       expectancyPct: 0,
       breakevenWinRate: 0,
       totalCostPct: 0,
+      rejectedEntries: 0,
     });
   });
 
