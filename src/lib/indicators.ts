@@ -157,7 +157,9 @@ export function calcMACD(
 }
 
 /** Bullish once the MACD line sits above its signal line, bearish below. */
-export function macdSignal(points: MACDPoint[]): "bullish" | "bearish" | "neutral" {
+export type MacdSignal = "bullish" | "bearish" | "neutral";
+
+export function macdSignal(points: MACDPoint[]): MacdSignal {
   if (points.length === 0) return "neutral";
   const last = points[points.length - 1];
   if (last.histogram > 0) return "bullish";
@@ -172,10 +174,9 @@ export function rsiSignal(value: number): "oversold" | "overbought" | "neutral" 
   return "neutral";
 }
 
-export function bbSignal(
-  close: number,
-  band: BollingerBands,
-): "above-upper" | "below-lower" | "inside" {
+export type BbPosition = "above-upper" | "below-lower" | "inside";
+
+export function bbSignal(close: number, band: BollingerBands): BbPosition {
   if (close >= band.upper) return "above-upper";
   if (close <= band.lower) return "below-lower";
   return "inside";
@@ -229,6 +230,33 @@ function periodChangePct(candles: Candle[]): number {
 }
 
 export type RelativeStrengthSignal = "outperforming" | "underperforming" | "inline";
+
+/**
+ * The timeframes the app reads indicators across. Separate from the chart's
+ * own `Timeframe` (types/index.ts) even though they currently list the same
+ * values, so adding a chart-only granularity wouldn't silently enlarge
+ * every signal table.
+ */
+export type SignalTimeframe = "1h" | "4h" | "1d" | "1w" | "1M";
+
+/**
+ * One timeframe's worth of indicator readings, in categorical form.
+ *
+ * This is the raw indicator view the detail table renders — it is NOT a
+ * score and nothing here weights or combines anything. The scoring lives
+ * entirely in lib/score, which reads numeric values rather than these
+ * buckets.
+ */
+export interface TimeframeSignal {
+  rsi: number;
+  macd: MacdSignal;
+  bbPosition: BbPosition;
+  /** Was the last candle's volume a real spike (>= 1.5x trailing average)? */
+  volumeSpike: boolean;
+  trend: TrendSignal;
+  /** The token's own move vs. BTC's over the same window. */
+  relativeStrength: RelativeStrengthSignal;
+}
 
 const RELATIVE_STRENGTH_THRESHOLD_PP = 5;
 

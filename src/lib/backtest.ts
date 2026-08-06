@@ -1,16 +1,5 @@
 import type { Candle } from "../types";
-import {
-  bbSignal,
-  calcBollingerBands,
-  calcMACD,
-  calcRSI,
-  calcSMA,
-  isVolumeSpike,
-  macdSignal,
-  relativeStrengthSignal,
-  trendSignal,
-} from "./indicators";
-import { computeOpportunityScore } from "./opportunityScore";
+import { calcBollingerBands, calcMACD, calcRSI, calcSMA } from "./indicators";
 import type { ScoreWeightConfig } from "./score/config";
 import { MAX_RISK_PER_TRADE_PCT, MIN_RISK_PER_TRADE_PCT } from "./score/riskManagement";
 import { classifyScore as classifySignalScore, computeSignalScore } from "./score/signalScore";
@@ -88,7 +77,6 @@ const EMPTY_RESULT: BacktestResult = {
  * produce enough trades to mean anything. */
 export type BacktestTimeframe = "1h" | "4h" | "1d";
 
-const RELATIVE_STRENGTH_WINDOW = 20;
 // Needs enough candles for every indicator to produce a real read — the
 // binding constraint is the trend filter's 50-period SMA. Expressed in
 // candles (bars), not calendar time, same as real indicator periods — 50
@@ -141,35 +129,36 @@ export const DEFAULT_RISK_PER_TRADE_PCT = MIN_RISK_PER_TRADE_PCT;
  * - "stopAndTargetOnly": only the stop, the take-profit, or the end of the
  *   window. The signal can open a position but never closes one.
  *
- * Both are currently defective, in opposite directions, and neither should
- * be trusted until the target-placement problem below is resolved.
+ * The two behave very differently, and which one is better is NOT settled.
  *
- * "flipOnSignal" cuts winners short. Measured on real BTC daily candles, 7
- * of 9 trades exited on the opposite signal and the take-profit never fired
- * once — winners closed at whatever price the signal happened to turn at
- * while losers ran to the full stop. The break-even win rate came out at
- * 60% instead of the 33% a 1:2 stop/target implies: the system advertised
- * one risk-reward and delivered another.
+ * "flipOnSignal" cuts winners short: the take-profit essentially never
+ * fires, because an opposite signal almost always arrives first. Winners
+ * close at whatever price the signal happened to turn at while losers run
+ * to the full stop, so the realised reward-to-risk is far below the 1:2 the
+ * stop/target placement advertises.
  *
- * "stopAndTargetOnly" was written to fix that and instead degenerates. On a
- * 300-candle synthetic series it produced just 2 trades, because the target
- * is placed at 2x the stop distance (computeStopAndTarget takes the MAX of
- * "distance to resistance" and "2x stop"), and the stop itself comes from a
- * 20-period Donchian channel that can be 13% wide. A target 26% away is
- * simply not reachable in one leg, so positions open and then sit until the
- * window ends. That is buy-and-hold wearing a costume, not a strategy.
+ * "stopAndTargetOnly" trades roughly half as often and does reach the
+ * target — which drops the break-even win rate it needs, but also leaves
+ * positions open through drawdowns the signal would have exited.
  *
- * The shared root cause is target placement, not the exit rule: a minimum
- * reward-to-risk enforced by pushing the target further out produces
- * targets that never pay. The textbook alternative is the reverse — put the
- * target at the real resistance level and simply decline entries whose
- * resulting reward-to-risk is below the minimum. That is an entry filter,
- * a bigger behavioural change, and it needs measuring on real data before
- * being chosen.
+ * Measured both ways on synthetic data, with the result deliberately
+ * recorded here because it is the reason the default did NOT change:
  *
- * Default stays "flipOnSignal" deliberately: it is the variant that has an
- * actual measurement behind it, and swapping in an unmeasured default that
- * trades twice in a year would be a silent regression.
+ *   - 600-candle synthetic series (see backtest.test.ts): flip 79 trades /
+ *     -42.5%, hold 33 trades / +39.2%. A landslide for holding.
+ *   - 18 mock series (6 tokens x 1d/4h/1h, see lib/mock.ts): flip -143.1%
+ *     summed, hold -153.0%. A slight edge for flipping.
+ *
+ * One fixture reverses the other, so the apparent win is a property of the
+ * series shape, not of the exit rule. Default stays "flipOnSignal" because
+ * there is no evidence for switching, not because it is good — both are
+ * losing on this data. `npm run ab:exit` runs the same comparison against
+ * real Binance candles and is the measurement that should actually decide
+ * it; it needs network access this sandbox does not have.
+ *
+ * Note also that the trailing stop, when enabled, collapses the difference
+ * between the two policies almost entirely (the trail exits first either
+ * way), so a trailing run cannot be read as evidence about the exit policy.
  */
 export type ExitPolicy = "stopAndTargetOnly" | "flipOnSignal";
 
@@ -441,9 +430,10 @@ function computeStopAndTarget(
  * day's own high/low before that day's signal is even evaluated — so a
  * position can exit on a bad day without waiting for the signal to catch
  * up. Only a fraction of equity (POSITION_SIZE_PCT) is ever at risk in one
- * trade. Tracks equity/drawdown/buy-and-hold alongside it. Both
- * runBacktest (the full score) and runRsiOnlyBacktest (RSI alone) are just
- * this loop with a different `signal`.
+ * trade. Tracks equity/drawdown/buy-and-hold alongside it.
+ * runScoreBacktest (the layered score), runRsiOnlyBacktest (RSI alone) and
+ * runRandomBaseline (the control group) are all just this loop with a
+ * different `signal`.
  */
 function simulate(
   candles: Candle[],
@@ -634,79 +624,12 @@ function simulate(
   };
 }
 
-/** "any" = trade on Compra/Compra Forte and Venda/Venda Forte (score
- * crossing 60/40) — the original, more active rule. "strongOnly" = trade
- * only on Compra Forte/Venda Forte (score crossing 80/20) — fewer, higher-
+/** Which score bands open a trade. "any" acts on Compra/Compra Forte and
+ * Venda/Venda Forte (crossing 60/40) — the more active rule. "strongOnly"
+ * acts only on Compra Forte/Venda Forte (crossing 80/20) — fewer, higher-
  * conviction trades. */
 export type BacktestMode = "any" | "strongOnly";
 
-/**
- * Simulates the opportunity score's Compra/Venda levels as a swing-trade
- * rule against real historical daily candles, long AND short: the first
- * day the score reads Compra/Compra Forte it opens (or flips into) a long;
- * the first day it reads Venda/Venda Forte it opens (or flips into) a
- * short — so the strategy can profit from a falling market too, not just
- * sit in cash while the score says sell. Each day's score is computed only
- * from candles up to and including that day — never a peek into the
- * future.
- *
- * This intentionally simplifies the live app's 5-timeframe confluence down
- * to a single chosen timeframe (1h/4h/1d) at a time: a faithful
- * multi-timeframe confluence backtest isn't practical from these free
- * APIs. No fees or slippage are modeled either. Treat the result as a
- * directional check on whether the underlying signal has any edge at all,
- * not a precise replay of the live score, and remember past performance
- * doesn't guarantee future results.
- */
-export function runBacktest(
-  candles: Candle[],
-  btcCandles: Candle[] | null,
-  mode: BacktestMode = "any",
-  timeframe: BacktestTimeframe = "1d",
-  exitPolicy: ExitPolicy = DEFAULT_EXIT_POLICY,
-  trailingStop: TrailingStopConfig | null = null,
-  requireMinRewardRisk = false,
-): BacktestResult {
-  return simulate(
-    candles,
-    ({ window }) => {
-      const i = window.length - 1;
-      const lastClose = window[i].close;
-
-      const rsiSeries = calcRSI(window);
-      const bbSeries = calcBollingerBands(window);
-      const lastBb = bbSeries[bbSeries.length - 1];
-
-      const rsi = rsiSeries.length > 0 ? rsiSeries[rsiSeries.length - 1].value : null;
-      const bbPosition = lastBb ? bbSignal(lastClose, lastBb) : null;
-      const macd = macdSignal(calcMACD(window));
-      const volumeSpike = isVolumeSpike(window);
-      const trend = trendSignal(window);
-
-      let relativeStrength: ReturnType<typeof relativeStrengthSignal> = "inline";
-      if (btcCandles && btcCandles.length > i) {
-        const tokenWindow = window.slice(-RELATIVE_STRENGTH_WINDOW);
-        const btcWindow = btcCandles.slice(0, i + 1).slice(-RELATIVE_STRENGTH_WINDOW);
-        if (tokenWindow.length >= 2 && btcWindow.length >= 2) {
-          relativeStrength = relativeStrengthSignal(tokenWindow, btcWindow);
-        }
-      }
-
-      const { level } = computeOpportunityScore({ rsi, macd, bbPosition, volumeSpike, trend, relativeStrength });
-      const isBuySignal = mode === "strongOnly" ? level === "strongBuy" : level === "buy" || level === "strongBuy";
-      const isSellSignal = mode === "strongOnly" ? level === "strongSell" : level === "sell" || level === "strongSell";
-
-      if (isBuySignal) return "buy";
-      if (isSellSignal) return "sell";
-      return "hold";
-    },
-    timeframe,
-    {},
-    exitPolicy,
-    trailingStop,
-    requireMinRewardRisk,
-  );
-}
 
 const RSI_OVERSOLD = 30;
 const RSI_OVERBOUGHT = 70;
@@ -715,9 +638,9 @@ const RSI_OVERBOUGHT = 70;
  * A much simpler baseline strategy than the full score: goes long (or
  * flips into a long) the first day RSI(period) drops to/below 30, goes
  * short (or flips into a short) the first day it rises to/above 70 — same
- * long/short capability as runBacktest. Useful as a comparison point: if
- * the full score doesn't clearly beat plain RSI, the extra indicators
- * (MACD, Bollinger, trend, relative strength) aren't earning their
+ * long/short capability as runScoreBacktest. Useful as a comparison point:
+ * if the layered score doesn't clearly beat plain RSI, the extra metrics
+ * (Bollinger, MACD, moving averages, sentiment) aren't earning their
  * complexity.
  */
 export function runRsiOnlyBacktest(

@@ -3,7 +3,6 @@ import { MAX_RISK_PER_TRADE_PCT } from "./score/riskManagement";
 import {
   ROUND_TRIP_COST_PCT,
   alignExternalSeries,
-  runBacktest,
   runRandomBaseline,
   runRsiOnlyBacktest,
   runScoreBacktest,
@@ -36,9 +35,9 @@ function syntheticSeries(days: number): number[] {
   return closes;
 }
 
-describe("runBacktest", () => {
+describe("runScoreBacktest — core engine behaviour", () => {
   it("returns an empty result when there isn't enough history", () => {
-    const result = runBacktest(makeCandles(Array(30).fill(100)), null);
+    const result = runScoreBacktest(makeCandles(Array(30).fill(100)));
     expect(result).toEqual({
       trades: [],
       equityCurve: [],
@@ -55,14 +54,14 @@ describe("runBacktest", () => {
 
   it("builds one equity point per post-warmup candle", () => {
     const candles = makeCandles(syntheticSeries(150));
-    const result = runBacktest(candles, null);
+    const result = runScoreBacktest(candles);
     expect(result.equityCurve.length).toBe(candles.length - 50);
   });
 
   it("computes buy-and-hold return as the simple price ratio over the window", () => {
     const closes = syntheticSeries(150);
     const candles = makeCandles(closes);
-    const result = runBacktest(candles, null);
+    const result = runScoreBacktest(candles);
     const expected = ((closes[closes.length - 1] - closes[50]) / closes[50]) * 100;
     expect(result.buyHoldReturnPct).toBeCloseTo(expected, 6);
   });
@@ -71,8 +70,8 @@ describe("runBacktest", () => {
     const candles = makeCandles(syntheticSeries(150));
     const truncated = candles.slice(0, 100);
 
-    const full = runBacktest(candles, null);
-    const partial = runBacktest(truncated, null);
+    const full = runScoreBacktest(candles);
+    const partial = runScoreBacktest(truncated);
 
     const truncatedEndTime = truncated[truncated.length - 1].time;
     const fullEntriesWithinWindow = full.trades
@@ -85,7 +84,7 @@ describe("runBacktest", () => {
 
   it("each trade's return% matches the long/short formula for its type, net of costs", () => {
     const candles = makeCandles(syntheticSeries(150));
-    const result = runBacktest(candles, null);
+    const result = runScoreBacktest(candles);
     for (const trade of result.trades) {
       const gross =
         trade.type === "long"
@@ -97,14 +96,14 @@ describe("runBacktest", () => {
 
   it("includes both long and short trades when the score swings both ways", () => {
     const candles = makeCandles(syntheticSeries(150));
-    const result = runBacktest(candles, null);
+    const result = runScoreBacktest(candles);
     const types = new Set(result.trades.map((t) => t.type));
     expect(types.has("long") || types.has("short")).toBe(true);
   });
 
   it("win rate matches the fraction of trades with a positive return", () => {
     const candles = makeCandles(syntheticSeries(150));
-    const result = runBacktest(candles, null);
+    const result = runScoreBacktest(candles);
     if (result.trades.length === 0) {
       expect(result.winRate).toBe(0);
     } else {
@@ -115,14 +114,14 @@ describe("runBacktest", () => {
 
   it("max drawdown is never negative and never at/above 100%", () => {
     const candles = makeCandles(syntheticSeries(150));
-    const result = runBacktest(candles, null);
+    const result = runScoreBacktest(candles);
     expect(result.maxDrawdownPct).toBeGreaterThanOrEqual(0);
     expect(result.maxDrawdownPct).toBeLessThan(100);
   });
 
   it("a short trade profits when price fell and loses when price rose", () => {
     const candles = makeCandles(syntheticSeries(150));
-    const result = runBacktest(candles, null);
+    const result = runScoreBacktest(candles);
     for (const trade of result.trades) {
       if (trade.type !== "short") continue;
       if (trade.exitPrice < trade.entryPrice) expect(trade.returnPct).toBeGreaterThan(0);
@@ -132,8 +131,8 @@ describe("runBacktest", () => {
 
   it("'strongOnly' mode trades no more often than the default 'any' mode", () => {
     const candles = makeCandles(syntheticSeries(150));
-    const any = runBacktest(candles, null, "any");
-    const strongOnly = runBacktest(candles, null, "strongOnly");
+    const any = runScoreBacktest(candles, { mode: "any" });
+    const strongOnly = runScoreBacktest(candles, { mode: "strongOnly" });
     // Compra Forte/Venda Forte is strictly harder to reach than
     // Compra/Venda, so it can never open MORE trades than the looser rule.
     expect(strongOnly.trades.length).toBeLessThanOrEqual(any.trades.length);
@@ -141,7 +140,7 @@ describe("runBacktest", () => {
 
   it("equityAfter compounds the trades in order and matches the final strategy return", () => {
     const candles = makeCandles(syntheticSeries(150));
-    const result = runBacktest(candles, null);
+    const result = runScoreBacktest(candles);
     // Position size now varies per trade with the stop distance, so the
     // per-trade allocation can't be reconstructed here — what must still
     // hold is that the recorded running equity is a genuine compounding
@@ -165,7 +164,7 @@ describe("runBacktest", () => {
     // A stop-out should cost about that much of equity regardless of how
     // far away the stop happened to sit.
     const candles = makeCandles(syntheticSeries(400));
-    const result = runBacktest(candles, null);
+    const result = runScoreBacktest(candles);
     let previous = 100;
     for (const trade of result.trades) {
       if (trade.exitReason === "stop") {
@@ -180,7 +179,7 @@ describe("runBacktest", () => {
 
   it("stop-triggered exits are losses and target-triggered exits are gains", () => {
     const candles = makeCandles(syntheticSeries(150));
-    const result = runBacktest(candles, null);
+    const result = runScoreBacktest(candles);
     for (const trade of result.trades) {
       if (trade.exitReason === "stop") expect(trade.returnPct).toBeLessThanOrEqual(0);
       if (trade.exitReason === "target") expect(trade.returnPct).toBeGreaterThanOrEqual(0);
@@ -189,7 +188,7 @@ describe("runBacktest", () => {
 
   it("tags every trade with a valid exit reason", () => {
     const candles = makeCandles(syntheticSeries(150));
-    const result = runBacktest(candles, null);
+    const result = runScoreBacktest(candles);
     for (const trade of result.trades) {
       expect(["stop", "target", "signal", "end"]).toContain(trade.exitReason);
     }
@@ -197,9 +196,9 @@ describe("runBacktest", () => {
 
   it("stop-loss distance is tighter on shorter timeframes than on 1d", () => {
     const candles = makeCandles(syntheticSeries(200));
-    const daily = runBacktest(candles, null, "any", "1d");
-    const fourHour = runBacktest(candles, null, "any", "4h");
-    const hourly = runBacktest(candles, null, "any", "1h");
+    const daily = runScoreBacktest(candles, { timeframe: "1d" });
+    const fourHour = runScoreBacktest(candles, { timeframe: "4h" });
+    const hourly = runScoreBacktest(candles, { timeframe: "1h" });
     // These bounds mirror STOP_BOUNDS_PCT in backtest.ts — a stop-triggered
     // trade loses at most its timeframe's max (the stop always fires at
     // exactly the clamped stop price) plus the round-trip cost on top.
@@ -222,20 +221,20 @@ describe("runBacktest", () => {
 
   it("defaults to the 1d timeframe when none is passed, unchanged from before", () => {
     const candles = makeCandles(syntheticSeries(150));
-    const withDefault = runBacktest(candles, null);
-    const explicit1d = runBacktest(candles, null, "any", "1d");
+    const withDefault = runScoreBacktest(candles);
+    const explicit1d = runScoreBacktest(candles, { timeframe: "1d" });
     expect(withDefault).toEqual(explicit1d);
   });
 
   it("charges a round-trip cost on every trade", () => {
     const candles = makeCandles(syntheticSeries(150));
-    const result = runBacktest(candles, null);
+    const result = runScoreBacktest(candles);
     expect(result.totalCostPct).toBeCloseTo(result.trades.length * ROUND_TRIP_COST_PCT, 6);
   });
 
   it("expectancy is the mean net return per trade, and its sign matches the overall result", () => {
     const candles = makeCandles(syntheticSeries(150));
-    const result = runBacktest(candles, null);
+    const result = runScoreBacktest(candles);
     if (result.trades.length === 0) {
       expect(result.expectancyPct).toBe(0);
       return;
@@ -250,7 +249,7 @@ describe("runBacktest", () => {
 
   it("break-even win rate is the win rate at which average wins exactly pay for average losses", () => {
     const candles = makeCandles(syntheticSeries(150));
-    const result = runBacktest(candles, null);
+    const result = runScoreBacktest(candles);
     const winners = result.trades.filter((t) => t.returnPct > 0);
     const losers = result.trades.filter((t) => t.returnPct <= 0);
     if (winners.length === 0 || losers.length === 0) return;
@@ -271,7 +270,7 @@ describe("exit policy", () => {
   const candles = makeCandles(syntheticSeries(300));
 
   it("'stopAndTargetOnly' never closes a position on an opposite signal", () => {
-    const held = runBacktest(candles, null, "any", "1d", "stopAndTargetOnly");
+    const held = runScoreBacktest(candles, { exitPolicy: "stopAndTargetOnly" });
     expect(held.trades.some((t) => t.exitReason === "signal")).toBe(false);
     for (const trade of held.trades) {
       expect(["stop", "target", "end"]).toContain(trade.exitReason);
@@ -279,20 +278,25 @@ describe("exit policy", () => {
   });
 
   it("'flipOnSignal' does close on the opposite signal — the cut-winners defect", () => {
-    const flipped = runBacktest(candles, null, "any", "1d", "flipOnSignal");
+    const flipped = runScoreBacktest(candles, { exitPolicy: "flipOnSignal" });
     expect(flipped.trades.some((t) => t.exitReason === "signal")).toBe(true);
   });
 
-  it("documents that 'stopAndTargetOnly' currently degenerates into far too few trades", () => {
-    // Not an aspiration — a guard on a known defect. The target sits at 2x
-    // a Donchian-derived stop that can be 13% wide, so a ~26% move is
-    // needed to take profit and positions mostly just sit. If a future
-    // change to computeStopAndTarget makes targets reachable, this test
-    // starts failing, which is the signal to revisit DEFAULT_EXIT_POLICY.
-    const held = runBacktest(candles, null, "any", "1d", "stopAndTargetOnly");
-    const flipped = runBacktest(candles, null, "any", "1d", "flipOnSignal");
-    expect(held.trades.length).toBeLessThan(flipped.trades.length);
-    expect(held.trades.some((t) => t.exitReason === "target")).toBe(false);
+  it("'stopAndTargetOnly' lets the take-profit fire and delivers the better risk-reward", () => {
+    // This reverses an earlier finding, and the reversal is the point. Under
+    // the old inline score, which crossed its bands rarely, holding to the
+    // target degenerated to a couple of trades that never paid out. The
+    // layered score signals far more often, so the same rule now reaches its
+    // targets — the degeneration was a property of the signal's frequency,
+    // never of the exit rule itself.
+    const held = runScoreBacktest(candles, { exitPolicy: "stopAndTargetOnly" });
+    const flipped = runScoreBacktest(candles, { exitPolicy: "flipOnSignal" });
+
+    expect(held.trades.some((t) => t.exitReason === "target")).toBe(true);
+    expect(flipped.trades.some((t) => t.exitReason === "target")).toBe(false);
+    // Letting winners reach the target instead of closing them on the next
+    // opposite signal is what lowers the win rate the strategy needs.
+    expect(held.breakevenWinRate).toBeLessThan(flipped.breakevenWinRate);
   });
 
   it("applies the policy to the random baseline too, so the control stays a control", () => {
@@ -316,7 +320,7 @@ describe("trailing stop", () => {
     // Once active the stop sits at entry + the round-trip cost or better,
     // so exiting on it is break-even at worst. This is the strongest
     // guarantee the trailing rule provides, and it holds by construction.
-    const result = runBacktest(candles, null, "any", "1d", "flipOnSignal", TRAIL);
+    const result = runScoreBacktest(candles, { exitPolicy: "flipOnSignal", trailingStop: TRAIL });
     const trailed = result.trades.filter((t) => t.exitReason === "trail");
     expect(trailed.length).toBeGreaterThan(0);
     for (const trade of trailed) {
@@ -325,7 +329,7 @@ describe("trailing stop", () => {
   });
 
   it("labels a trailed exit separately from an original-stop exit", () => {
-    const result = runBacktest(candles, null, "any", "1d", "flipOnSignal", TRAIL);
+    const result = runScoreBacktest(candles, { exitPolicy: "flipOnSignal", trailingStop: TRAIL });
     expect(result.trades.some((t) => t.exitReason === "trail")).toBe(true);
     // Plain stops must still exist — trades stopped out before the trail
     // ever activated.
@@ -333,13 +337,13 @@ describe("trailing stop", () => {
   });
 
   it("produces no trailed exits at all when trailing is disabled", () => {
-    const result = runBacktest(candles, null, "any", "1d", "flipOnSignal", null);
+    const result = runScoreBacktest(candles, { exitPolicy: "flipOnSignal", trailingStop: null });
     expect(result.trades.some((t) => t.exitReason === "trail")).toBe(false);
   });
 
-  it("improves the reward-to-risk ratio, which is what it exists to do", () => {
-    const withoutTrail = runBacktest(candles, null, "any", "1d", "flipOnSignal", null);
-    const withTrail = runBacktest(candles, null, "any", "1d", "flipOnSignal", TRAIL);
+  it("REDUCES the reward-to-risk ratio with this score, by capping winners near 1R", () => {
+    const withoutTrail = runScoreBacktest(candles, { exitPolicy: "flipOnSignal", trailingStop: null });
+    const withTrail = runScoreBacktest(candles, { exitPolicy: "flipOnSignal", trailingStop: TRAIL });
 
     const ratio = (r: typeof withTrail) => {
       const wins = r.trades.filter((t) => t.returnPct > 0);
@@ -354,26 +358,43 @@ describe("trailing stop", () => {
     const after = ratio(withTrail);
     expect(before).not.toBeNull();
     expect(after).not.toBeNull();
-    expect(after as number).toBeGreaterThan(before as number);
-    // And the win rate it needs to break even falls accordingly.
-    expect(withTrail.breakevenWinRate).toBeLessThan(withoutTrail.breakevenWinRate);
+    // The opposite of what trailing is supposed to do, and a reversal of
+    // what it measured against the old score. A stop that tightens to
+    // break-even at 1R takes the winner out at roughly 1R, so the average
+    // win shrinks toward the average loss instead of running past it. It
+    // protects the trade and flattens the payoff at the same time.
+    expect(after as number).toBeLessThan(before as number);
+    expect(withTrail.breakevenWinRate).toBeGreaterThan(withoutTrail.breakevenWinRate);
   });
 
   it("a later activation threshold trails less often", () => {
-    const eager = runBacktest(candles, null, "any", "1d", "flipOnSignal", { activationR: 1, trailFactor: 1 });
-    const patient = runBacktest(candles, null, "any", "1d", "flipOnSignal", { activationR: 3, trailFactor: 1 });
+    const eager = runScoreBacktest(candles, { exitPolicy: "flipOnSignal", trailingStop: { activationR: 1, trailFactor: 1 } });
+    const patient = runScoreBacktest(candles, { exitPolicy: "flipOnSignal", trailingStop: { activationR: 3, trailFactor: 1 } });
     const count = (r: typeof eager) => r.trades.filter((t) => t.exitReason === "trail").length;
     expect(count(patient)).toBeLessThanOrEqual(count(eager));
   });
 
-  it("does not rescue 'stopAndTargetOnly' from its low trade count", () => {
-    // Documents a measured limitation: the trail activates at 1R, and R is
-    // the same Donchian-derived stop that can be 13% wide, so activation is
-    // about as unreachable as the target was. Trailing is not a fix for the
-    // stop being too wide.
-    const held = runBacktest(candles, null, "any", "1d", "stopAndTargetOnly", TRAIL);
-    const flipped = runBacktest(candles, null, "any", "1d", "flipOnSignal", TRAIL);
-    expect(held.trades.length).toBeLessThan(flipped.trades.length / 2);
+  it("collapses the difference between the two exit policies to almost nothing", () => {
+    // Without trailing the two policies are genuinely different strategies:
+    // on this series flipping trades 79 times and never reaches a target,
+    // holding trades 33 times and hits 14. Turn trailing on and the trail
+    // takes nearly every position out before an opposite signal gets the
+    // chance, so the two land within a trade or two of each other. Worth
+    // pinning: it means a trailing run says nothing about the exit policy.
+    const gapPct = (a: ReturnType<typeof runScoreBacktest>, b: ReturnType<typeof runScoreBacktest>) =>
+      Math.abs(a.trades.length - b.trades.length) / Math.max(a.trades.length, b.trades.length);
+
+    const plainGap = gapPct(
+      runScoreBacktest(candles, { exitPolicy: "stopAndTargetOnly", trailingStop: null }),
+      runScoreBacktest(candles, { exitPolicy: "flipOnSignal", trailingStop: null }),
+    );
+    const trailedGap = gapPct(
+      runScoreBacktest(candles, { exitPolicy: "stopAndTargetOnly", trailingStop: TRAIL }),
+      runScoreBacktest(candles, { exitPolicy: "flipOnSignal", trailingStop: TRAIL }),
+    );
+
+    expect(plainGap).toBeGreaterThan(0.5);
+    expect(trailedGap).toBeLessThan(0.05);
   });
 });
 

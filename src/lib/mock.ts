@@ -21,7 +21,7 @@ import {
   type RelativeStrengthSignal,
   type TrendSignal,
 } from "./indicators";
-import type { MacdSignal, BbPosition, SignalTimeframe } from "./opportunityScore";
+import type { MacdSignal, BbPosition, SignalTimeframe } from "./indicators";
 
 // Deterministic PRNG so demo mode looks the same across reloads/screenshots.
 function mulberry32(seed: number) {

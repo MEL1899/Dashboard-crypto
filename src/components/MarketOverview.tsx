@@ -4,7 +4,7 @@ import { Info } from "lucide-react";
 import type { BollingerBands, Candle, MarketToken } from "../types";
 import { bbSignal } from "../lib/indicators";
 import type { RelativeStrengthSignal, TrendSignal } from "../lib/indicators";
-import type { BbPosition, MacdSignal, SignalTimeframe } from "../lib/opportunityScore";
+import type { BbPosition, MacdSignal, SignalTimeframe } from "../lib/indicators";
 import type { TokenSignals } from "../hooks/useWatchlistSignals";
 import type { Currency } from "../lib/currency";
 import { Badge, Card, formatMoney, formatPrice, ScoreBadge, ScoreSparkline } from "./common";

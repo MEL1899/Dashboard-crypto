@@ -13,7 +13,7 @@ import {
   type ExitReason,
 } from "../lib/backtest";
 import { BACKTEST_WINDOW_OPTIONS } from "../lib/backtestData";
-import { useBacktestAll, type BacktestSummary, type ScoreEngine } from "../hooks/useBacktestAll";
+import { useBacktestAll, type BacktestSummary } from "../hooks/useBacktestAll";
 import { useRsiBacktestAll, type RsiBacktestSummary } from "../hooks/useRsiBacktestAll";
 import { Card, Spinner, formatPrice } from "./common";
 
@@ -97,18 +97,14 @@ interface SelectedDetail {
 }
 
 /**
- * What the run is testing. The first two use the layered score (lib/score)
- * — the same formula the rest of the app now displays — at its stricter and
- * looser bands. "legacy" is the older inline score it replaced, kept so the
- * two can be compared on identical candles. "rsi" is plain RSI, the
- * simplest baseline of all.
+ * What the run is testing: the score at its stricter or looser band, or
+ * plain RSI as the simplest possible baseline.
  */
-type Strategy = "strongOnly" | "any" | "legacy" | "rsi";
+type Strategy = "strongOnly" | "any" | "rsi";
 
 const STRATEGY_OPTIONS: { label: string; value: Strategy }[] = [
-  { label: "Score em camadas — Só Compra Forte/Venda Forte (≥80 / ≤20)", value: "strongOnly" },
-  { label: "Score em camadas — Compra/Venda (≥60 / ≤40)", value: "any" },
-  { label: "Score antigo — Compra/Venda (para comparar)", value: "legacy" },
+  { label: "Score — Só Compra Forte/Venda Forte (≥80 / ≤20)", value: "strongOnly" },
+  { label: "Score — Compra/Venda (≥60 / ≤40)", value: "any" },
   { label: "RSI puro", value: "rsi" },
 ];
 
@@ -402,11 +398,7 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
       setLastRun({ source: "rsi", label: `RSI(${rsiPeriod})`, timeframe });
     } else {
       const strategyLabel = STRATEGY_OPTIONS.find((opt) => opt.value === strategy)?.label ?? "Score";
-      // "legacy" selects the old engine at its Compra/Venda band; the other
-      // two select the layered engine at the band they name.
-      const engine: ScoreEngine = strategy === "legacy" ? "legacy" : "layered";
-      const mode: BacktestMode = strategy === "strongOnly" ? "strongOnly" : "any";
-      scoreBatch.runAll(tokens, apiKey, mode, windowDays, timeframe, engine);
+      scoreBatch.runAll(tokens, apiKey, strategy as BacktestMode, windowDays, timeframe);
       setLastRun({ source: "score", label: strategyLabel, timeframe });
     }
   }
@@ -433,11 +425,10 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
           comprado (long) E vendido (short): abre ou vira comprado na primeira vela em que o
           sinal escolhido abaixo aponta compra, abre ou vira vendido na primeira em que aponta
           venda — ou seja, também pode lucrar com o mercado caindo, não só subindo. Escolha o
-          sinal: as duas primeiras opções usam o <strong>score em camadas</strong>, o mesmo que a
-          aba Mercado exibe (técnico + sentimento, com o grupo on-chain fora por falta de
-          histórico gratuito), em faixas mais ou menos exigentes; "Score antigo" roda a fórmula
-          anterior sobre as mesmas velas, pra você comparar as duas; RSI puro usa só o RSI (≤30
-          compra, ≥70 vende) como linha de base mais simples. Escolha também o timeframe: 1h/4h pra
+          sinal: as duas primeiras opções usam o mesmo score que a aba Mercado exibe (técnico +
+          sentimento, com o grupo on-chain fora por falta de histórico gratuito), em faixas
+          mais ou menos exigentes; RSI puro usa só o RSI (≤30 compra, ≥70 vende) como linha de
+          base mais simples. Escolha também o timeframe: 1h/4h pra
           horizontes mais curtos (poucos dias), 1d pro swing trade clássico (dias a semanas) —
           quanto menor a vela, menos histórico real dá pra buscar (a Binance limita a 1000
           velas por consulta: ~41 dias em 1h, ~166 dias em 4h, ~2,7 anos em 1d), e o stop/alvo

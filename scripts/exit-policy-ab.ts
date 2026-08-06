@@ -6,27 +6,32 @@
  * scored against a random-entry baseline running under the same exit rule,
  * so the comparison isolates the exit and not the entry.
  *
- * This exists because synthetic data could not settle it. On a smooth
- * synthetic series the trailing stop clearly improved reward-to-risk
- * (0.42 -> 1.20) and cut the break-even win rate (71% -> 46%), yet lowered
- * raw return (+17.4% -> +10.1%). A sine wave is not a market: it lacks the
- * fat tails that are exactly where a trailing stop earns its keep. Only
- * real candles can decide.
+ * This exists because synthetic data could not settle it, and in fact
+ * contradicted itself. On a 600-candle synthetic series "stop/alvo" beat
+ * "flip" by a landslide (+39.2% vs -42.5%); across the 18 deterministic
+ * mock series the ranking flipped (-153.0% vs -143.1% summed). A sine wave
+ * is not a market: it lacks the fat tails that are exactly where a trailing
+ * stop and a distant target earn their keep. Only real candles can decide,
+ * which is why DEFAULT_EXIT_POLICY has not moved.
  *
- * Needs network access to api.binance.com. No key required.
+ * Needs network access to api.binance.com and api.alternative.me (the
+ * Fear & Greed history, so the score's sentiment group is actually part of
+ * what is under test). No key required.
  *
  *   npm run ab:exit
  *   npm run ab:exit -- BTCUSDT,ETHUSDT,SOLUSDT 4h
  */
 
 import {
-  runBacktest,
   runRandomBaseline,
+  runScoreBacktest,
   type BacktestResult,
   type BacktestTimeframe,
   type ExitPolicy,
+  type ExternalSeriesInput,
   type TrailingStopConfig,
 } from "../src/lib/backtest";
+import { fetchFearGreedHistory } from "../src/lib/fearGreed";
 import type { Candle } from "../src/types";
 
 const DEFAULT_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "LINKUSDT"];
@@ -76,6 +81,16 @@ async function main() {
 
   console.log(`A/B de regra de saída — ${symbols.join(", ")} @ ${timeframe}\n`);
 
+  // Market-wide, so it is fetched once and shared. Without it the score's
+  // sentiment group drops out and only the technical group is under test.
+  let external: ExternalSeriesInput = {};
+  try {
+    external = { fearGreed: await fetchFearGreedHistory() };
+  } catch (err) {
+    console.log(`Aviso: histórico do Fear & Greed indisponível (${(err as Error).message}).`);
+    console.log("Rodando só com o grupo técnico.\n");
+  }
+
   const totals = new Map<string, { edge: number[]; ret: number[]; trades: number; rr: number[] }>();
   for (const v of VARIANTS) totals.set(v.label, { edge: [], ret: [], trades: 0, rr: [] });
   let tested = 0;
@@ -96,7 +111,13 @@ async function main() {
     );
 
     for (const { label, policy, trail } of VARIANTS) {
-      const result = runBacktest(candles, null, "any", timeframe, policy, trail);
+      const result = runScoreBacktest(candles, {
+        timeframe,
+        mode: "any",
+        external,
+        exitPolicy: policy,
+        trailingStop: trail,
+      });
       const frequency =
         result.equityCurve.length > 0 ? result.trades.length / result.equityCurve.length : 0;
       // The control must share the exit rule, or it stops being a control

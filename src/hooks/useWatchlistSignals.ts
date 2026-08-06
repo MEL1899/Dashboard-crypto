@@ -16,14 +16,7 @@ import {
   trendSignal,
 } from "../lib/indicators";
 import { mockCandles, mockSignalsByTimeframe } from "../lib/mock";
-import {
-  computeConfluenceScore,
-  type BbPosition,
-  type MacdSignal,
-  type OpportunityScoreResult,
-  type SignalTimeframe,
-  type TimeframeSignal,
-} from "../lib/opportunityScore";
+import type { BbPosition, MacdSignal, SignalTimeframe, TimeframeSignal } from "../lib/indicators";
 import type { Candle } from "../types";
 
 const BTC_TOKEN_ID = "bitcoin";
@@ -42,14 +35,6 @@ export interface TokenSignals {
   /** Which groups agree, shown as a label beside the score and never folded
    * into it (see lib/score/confluence.ts). */
   confluence: ConfluenceResult;
-  /**
-   * The previous inline score, kept alongside rather than deleted: the two
-   * disagree by design (this one blends 5 timeframes of enum-ised signals,
-   * the layered one reads raw values across 3 plus sentiment and funding),
-   * and until the new one is validated on real data there is value in being
-   * able to see both.
-   */
-  legacyScore: OpportunityScoreResult;
   /** true if at least one of the 3 timeframes fell back to mock data. */
   isDemo: boolean;
 }
@@ -154,7 +139,6 @@ function buildTokenSignals(
     byTimeframe,
     score,
     confluence: evaluateConfluence(score.groups),
-    legacyScore: computeConfluenceScore(byTimeframe),
     isDemo,
   };
 }
@@ -210,9 +194,9 @@ async function fetchTokenSignals(
 
 /**
  * Real RSI+MACD+Bollinger for all 3 timeframes, for every watchlist token,
- * combined into one confluence score per token (lib/opportunityScore.ts) —
- * what feeds the table's RSI columns/Score and the detail panel's Score
- * card, identically, regardless of which timeframe the chart has open.
+ * fed into the layered score (lib/score/) — what drives the table's RSI
+ * columns and Score badge and the detail panel's Score card, identically,
+ * regardless of which timeframe the chart has open.
  * Falls back per-timeframe to the deterministic mock (lib/mock.ts) only
  * when that one fetch fails, same resilience pattern as the rest of the app.
  */

@@ -88,7 +88,6 @@ const FALLBACK_SIGNALS: TokenSignals = {
   // this placeholder can't drift out of shape as the result type grows.
   score: computeSignalScore({}),
   confluence: evaluateConfluence([]),
-  legacyScore: { score: 50, level: "neutral", breakdown: [] },
   isDemo: true,
 };
 
