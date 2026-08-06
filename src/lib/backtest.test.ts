@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { MAX_RISK_PER_TRADE_PCT } from "./score/riskManagement";
 import {
-  POSITION_SIZE_PCT,
   ROUND_TRIP_COST_PCT,
   alignExternalSeries,
   runBacktest,
@@ -139,18 +139,42 @@ describe("runBacktest", () => {
     expect(strongOnly.trades.length).toBeLessThanOrEqual(any.trades.length);
   });
 
-  it("equityAfter compounds the trades in order, starting from 100, and matches the final strategy return", () => {
+  it("equityAfter compounds the trades in order and matches the final strategy return", () => {
     const candles = makeCandles(syntheticSeries(150));
     const result = runBacktest(candles, null);
-    const allocation = POSITION_SIZE_PCT / 100;
-    let expectedEquity = 100;
+    // Position size now varies per trade with the stop distance, so the
+    // per-trade allocation can't be reconstructed here — what must still
+    // hold is that the recorded running equity is a genuine compounding
+    // chain ending exactly at the reported strategy return.
+    let previous = 100;
     for (const trade of result.trades) {
-      expectedEquity *= Math.max(0, 1 - allocation + allocation * (1 + trade.returnPct / 100));
-      expect(trade.equityAfter).toBeCloseTo(expectedEquity, 6);
+      expect(Number.isFinite(trade.equityAfter)).toBe(true);
+      expect(trade.equityAfter).toBeGreaterThanOrEqual(0);
+      // A winning trade must raise equity and a losing one must lower it.
+      if (trade.returnPct > 0) expect(trade.equityAfter).toBeGreaterThan(previous);
+      if (trade.returnPct < 0) expect(trade.equityAfter).toBeLessThan(previous);
+      previous = trade.equityAfter;
     }
     if (result.trades.length > 0) {
-      const lastEquityAfter = result.trades[result.trades.length - 1].equityAfter;
-      expect(lastEquityAfter).toBeCloseTo(100 + result.strategyReturnPct, 6);
+      expect(previous).toBeCloseTo(100 + result.strategyReturnPct, 6);
+    }
+  });
+
+  it("sizes every position so a stop-out costs the configured risk budget, not a fixed slice", () => {
+    // The doc's rule (section 4): risk 1-2% per trade, sized from the stop.
+    // A stop-out should cost about that much of equity regardless of how
+    // far away the stop happened to sit.
+    const candles = makeCandles(syntheticSeries(400));
+    const result = runBacktest(candles, null);
+    let previous = 100;
+    for (const trade of result.trades) {
+      if (trade.exitReason === "stop") {
+        const equityLossPct = ((previous - trade.equityAfter) / previous) * 100;
+        // Never more than the 2% ceiling, plus a little slack for the cost
+        // charged on top of the stop distance itself.
+        expect(equityLossPct).toBeLessThanOrEqual(MAX_RISK_PER_TRADE_PCT + 0.5);
+      }
+      previous = trade.equityAfter;
     }
   });
 

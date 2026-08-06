@@ -5,7 +5,7 @@ import { ListChecks } from "lucide-react";
 import type { MarketToken } from "../types";
 import type { Currency } from "../lib/currency";
 import {
-  POSITION_SIZE_PCT,
+  DEFAULT_RISK_PER_TRADE_PCT,
   ROUND_TRIP_COST_PCT,
   type BacktestMode,
   type BacktestResult,
@@ -433,8 +433,11 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
           velas por consulta: ~41 dias em 1h, ~166 dias em 4h, ~2,7 anos em 1d), e o stop/alvo
           são recalibrados pra cada um. Cada entrada já sai com stop-loss e take-profit
           calculados a partir do suporte/resistência recente (mínima/máxima das últimas 20
-          velas), e só {POSITION_SIZE_PCT}% do capital fica alocado por trade — o resto fica de
-          fora, então um trade ruim nunca zera a conta sozinho. Todo trade paga{" "}
+          velas), e o tamanho da posição sai da distância até o stop de forma que cada trade
+          arrisque {DEFAULT_RISK_PER_TRADE_PCT}% do capital — stop apertado gera posição maior,
+          stop largo gera posição menor, e a perda é a mesma nos dois casos. É a mesma regra de
+          1-2% que a aba de gestão de risco recomenda, então o backtest simula a disciplina que
+          o app prega, não uma mais agressiva. Todo trade paga{" "}
           {ROUND_TRIP_COST_PCT.toFixed(2)}% de custo de ida e volta (taxa + slippage), então
           resultados de alta frequência não aparecem inflados aqui. Usa só um timeframe por vez
           — não a confluência completa de 5 timeframes do app. Buy & hold aparece como

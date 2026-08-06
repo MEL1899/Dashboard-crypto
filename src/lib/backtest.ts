@@ -12,6 +12,7 @@ import {
 } from "./indicators";
 import { computeOpportunityScore } from "./opportunityScore";
 import type { ScoreWeightConfig } from "./score/config";
+import { MAX_RISK_PER_TRADE_PCT, MIN_RISK_PER_TRADE_PCT } from "./score/riskManagement";
 import { classifyScore as classifySignalScore, computeSignalScore } from "./score/signalScore";
 
 /** Why a trade closed: "stop"/"target" fired intraday off the position's own
@@ -115,10 +116,23 @@ const STOP_BOUNDS_PCT: Record<BacktestTimeframe, { min: number; max: number }> =
 // stop distance, the target is extended to it instead — no point risking
 // more than you stand to gain.
 const MIN_REWARD_RISK_RATIO = 2;
-// Only a fraction of equity is committed to any single trade; the rest sits
-// out, so one stopped-out trade can only ever cost a bounded slice of the
-// account instead of being able to compound into a full wipeout.
-export const POSITION_SIZE_PCT = 50;
+/**
+ * Risk per trade, as a % of equity — the doc's rule (section 4), and the
+ * same band the risk panel shows the user.
+ *
+ * Position size is DERIVED from this and the stop distance rather than
+ * being a fixed slice of the account: a 3%-away stop gets a third of
+ * equity, a 15%-away stop gets a fifteenth, and either way exactly this
+ * much is at stake. That is the whole point of the 1-2% guideline, and a
+ * fixed allocation quietly breaks it — at 50% allocation a 15% stop costs
+ * 7.5% of the account, nearly four times the recommended maximum, so the
+ * backtest was measuring a far more aggressive strategy than the product
+ * tells the user to run.
+ *
+ * The band itself lives in score/riskManagement.ts so the panel and the
+ * simulation can never drift apart.
+ */
+export const DEFAULT_RISK_PER_TRADE_PCT = MIN_RISK_PER_TRADE_PCT;
 
 /**
  * What is allowed to close an open position.
@@ -272,6 +286,10 @@ interface OpenPosition {
   /** Distance from entry to the ORIGINAL stop — one "R", the unit the
    * trailing rule is expressed in. Kept separate because stopPrice moves. */
   initialRisk: number;
+  /** Fraction of equity committed, fixed at entry from the stop distance.
+   * Never re-sized mid-trade: the trailing stop moves the exit, not the
+   * bet you already placed. */
+  allocationFraction: number;
   /** Best price seen in the trade's favour since entry. */
   bestPrice: number;
   /** True once the trailing stop has moved at least once, so a resulting
@@ -288,6 +306,21 @@ interface OpenPosition {
  * stop exactly at the entry price still loses the round-trip fee, so
  * break-even is placed just past it.
  */
+/**
+ * Fraction of equity to commit so that being stopped out costs exactly
+ * `riskPerTradePct` of the account — the doc's position-sizing rule, worked
+ * backwards from where "wrong" sits.
+ *
+ * Capped at 1: a stop closer than the risk budget would imply borrowing,
+ * and nothing here models leverage. When the cap binds, the trade simply
+ * risks less than budgeted, which is the safe direction to err.
+ */
+function allocationForRisk(entryPrice: number, stopPrice: number, riskPerTradePct: number): number {
+  const stopDistancePct = (Math.abs(entryPrice - stopPrice) / entryPrice) * 100;
+  if (stopDistancePct <= 0) return 0;
+  return Math.min(1, riskPerTradePct / stopDistancePct);
+}
+
 function trailingStopPrice(position: OpenPosition, trail: TrailingStopConfig): number | null {
   const { entryPrice, initialRisk, bestPrice, type } = position;
   if (initialRisk <= 0) return null;
@@ -423,6 +456,8 @@ function simulate(
   /** Turns the minimum reward-to-risk into an entry filter instead of a
    * target stretcher — see computeStopAndTarget. */
   requireMinRewardRisk = false,
+  /** % of equity risked per trade; clamped to the 1-2% band. */
+  riskPerTradePct: number = DEFAULT_RISK_PER_TRADE_PCT,
 ): BacktestResult {
   if (candles.length <= WARMUP_INDEX) return EMPTY_RESULT;
 
@@ -443,7 +478,7 @@ function simulate(
   // control-flow analysis, which then can't ever prove it non-null again.
   let position: OpenPosition | null = null;
   const startPrice = candles[WARMUP_INDEX].close;
-  const allocationFraction = POSITION_SIZE_PCT / 100;
+  const riskPct = clamp(riskPerTradePct, MIN_RISK_PER_TRADE_PCT, MAX_RISK_PER_TRADE_PCT);
 
   // Books a closed trade's equity impact and record; does NOT touch
   // `position` itself, so every call site clears it inline right after.
@@ -452,7 +487,7 @@ function simulate(
   // already what the account would actually have seen.
   function recordTrade(closed: OpenPosition, exitTime: number, exitPrice: number, exitReason: ExitReason) {
     const returnPct = positionReturnPct(closed, exitPrice) - ROUND_TRIP_COST_PCT;
-    equity *= equityFactor(returnPct, allocationFraction);
+    equity *= equityFactor(returnPct, closed.allocationFraction);
     trades.push({
       type: closed.type,
       entryTime: closed.entryTime,
@@ -541,6 +576,7 @@ function simulate(
           stopPrice,
           takeProfitPrice,
           initialRisk: side === "long" ? lastClose - stopPrice : stopPrice - lastClose,
+          allocationFraction: allocationForRisk(lastClose, stopPrice, riskPct),
           bestPrice: lastClose,
           trailing: false,
         };
@@ -553,7 +589,7 @@ function simulate(
     equityCurve.push({
       time,
       equity: position
-        ? equity * equityFactor(positionReturnPct(position, lastClose), allocationFraction)
+        ? equity * equityFactor(positionReturnPct(position, lastClose), position.allocationFraction)
         : equity,
       buyHoldEquity: (lastClose / startPrice) * 100,
     });
