@@ -113,6 +113,11 @@ export function RiskGuidancePanel({ currency }: { currency: Currency }) {
             <div className="num-mono mt-1 text-lg font-semibold text-[var(--color-text)]">
               {formatPrice(size.positionValue, currency)}
             </div>
+            {size.cappedByCapital && (
+              <div className="mt-1 text-[10px] leading-snug text-[var(--color-down)]">
+                Limitado ao capital
+              </div>
+            )}
           </div>
           <div className="rounded-lg border border-[var(--color-border)] p-3">
             <div className="text-xs text-[var(--color-text-dim)]">Unidades</div>
@@ -131,6 +136,16 @@ export function RiskGuidancePanel({ currency }: { currency: Currency }) {
         <p className="mt-4 text-sm text-[var(--color-text-dim)]">
           Preencha capital, entrada e stop para calcular o tamanho da posição. Entrada e stop
           precisam ser diferentes.
+        </p>
+      )}
+
+      {size?.cappedByCapital && (
+        <p className="mt-3 rounded-lg border border-[var(--color-down)]/40 bg-[var(--color-down)]/10 p-3 text-xs leading-relaxed text-[var(--color-text)]">
+          O stop está perto demais da entrada para arriscar {parseNumber(riskPct) ?? 1}% do capital sem
+          alavancagem: seria preciso comprar {formatPrice(size.requestedRiskAmount / (size.stopDistancePct / 100), currency)},
+          acima do capital informado. A posição foi limitada a {formatPrice(size.positionValue, currency)}, o que
+          arrisca {formatPrice(size.riskAmount, currency)} em vez de {formatPrice(size.requestedRiskAmount, currency)}.
+          Este app não dimensiona posição alavancada.
         </p>
       )}
 

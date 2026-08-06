@@ -23,7 +23,12 @@ export function loadScoreHistory(): ScoreHistory {
 
 export function saveScoreHistory(history: ScoreHistory): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+  } catch {
+    // Same reasoning as saveSettings: a sparkline that stops persisting is
+    // a nuisance, an exception thrown from inside a state updater is not.
+  }
 }
 
 /** Appends one point for a token, capped to the last MAX_POINTS_PER_TOKEN —

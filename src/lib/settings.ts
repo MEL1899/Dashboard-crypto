@@ -27,5 +27,11 @@ export function loadSettings(): AppSettings {
 
 export function saveSettings(settings: AppSettings): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  } catch {
+    // setItem throws on a full quota and in Safari's private mode. Losing
+    // persistence is a nuisance; letting it throw out of a render effect
+    // takes the whole app down with it. `load` already guarded this side.
+  }
 }

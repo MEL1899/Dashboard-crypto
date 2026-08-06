@@ -1,14 +1,18 @@
 import { useState } from "react";
 import { mockCandles } from "../lib/mock";
 import {
+  RSI_SERIES_ID,
+  rsiSeriesFor,
   runRandomBaseline,
   runScoreBacktest,
   type BacktestMode,
   type BacktestResult,
   type BacktestTimeframe,
+  type ExitPolicy,
   type ExternalSeriesInput,
 } from "../lib/backtest";
 import { BTC_TOKEN_ID, fetchBacktestCandles } from "../lib/backtestData";
+import { fetchFundingRateHistory, symbolForToken } from "../lib/binance";
 import { fetchFearGreedHistory } from "../lib/fearGreed";
 import type { Candle, MarketToken } from "../types";
 
@@ -21,6 +25,19 @@ export interface BacktestSummary {
    * any edge at all. */
   baseline: BacktestResult;
   isDemo: boolean;
+  /** Which of the score's inputs the run actually had, so the panel can say
+   * whether it tested the same formula the Mercado tab displays. */
+  inputs: RunInputs;
+}
+
+/** What was available to this particular run. A backtest missing funding or
+ * Fear & Greed is testing a smaller score than the app shows, and the user
+ * should not have to guess which. */
+export interface RunInputs {
+  fearGreed: boolean;
+  fundingRate: boolean;
+  /** Timeframes whose RSI fed the multi-timeframe blend. */
+  rsiTimeframes: BacktestTimeframe[];
 }
 
 /** Runs the control group at the strategy's own trade frequency, so the
@@ -31,9 +48,14 @@ export function baselineFor(
   candles: Candle[],
   seed: string,
   timeframe: BacktestTimeframe,
+  /** Must match the run being compared against — a control that exits by a
+   * different rule is a control for the exit, not for the signal. Forwarded
+   * explicitly rather than left to a shared default, which would have gone
+   * quietly wrong the first time the UI exposed the choice. */
+  exitPolicy?: ExitPolicy,
 ): BacktestResult {
   const tradeFrequency = result.equityCurve.length > 0 ? result.trades.length / result.equityCurve.length : 0;
-  return runRandomBaseline(candles, tradeFrequency, seed, timeframe);
+  return runRandomBaseline(candles, tradeFrequency, seed, timeframe, exitPolicy);
 }
 
 interface BatchState {
@@ -43,6 +65,15 @@ interface BatchState {
 }
 
 const IDLE_STATE: BatchState = { running: false, progress: { done: 0, total: 0 }, summaries: [] };
+
+/** The other two timeframes the live score blends RSI across, for a run on
+ * a given one. Fetched so the backtest reproduces the same blend instead of
+ * testing a single-timeframe variant of the score. */
+const OTHER_RSI_TIMEFRAMES: Record<BacktestTimeframe, BacktestTimeframe[]> = {
+  "1d": ["1h", "4h"],
+  "4h": ["1h", "1d"],
+  "1h": ["4h", "1d"],
+};
 
 /**
  * Runs the backtest across every given token, one at a time — deliberately
@@ -74,11 +105,11 @@ export function useBacktestAll() {
     // market-wide series, not a per-asset one. Without it the layered
     // score's sentiment group drops out and only the technical group is
     // actually under test.
-    let external: ExternalSeriesInput = {};
+    let fearGreed: ExternalSeriesInput["fearGreed"] | null = null;
     try {
-      external = { fearGreed: await fetchFearGreedHistory() };
+      fearGreed = await fetchFearGreedHistory();
     } catch {
-      external = {};
+      fearGreed = null;
     }
 
     const summaries: BacktestSummary[] = [];
@@ -92,9 +123,53 @@ export function useBacktestAll() {
         candles = mockCandles(token.id, timeframe);
         isDemo = true;
       }
+
+      const external: ExternalSeriesInput = {};
+      if (fearGreed) external.fearGreed = fearGreed;
+
+      // Per-asset, unlike Fear & Greed — funding is a property of this
+      // token's own perpetual. Only tokens with a Binance mapping have one.
+      const symbol = symbolForToken(token.id);
+      if (symbol && !isDemo) {
+        try {
+          const funding = await fetchFundingRateHistory(symbol);
+          if (funding.length > 0) external.fundingRate = funding;
+        } catch {
+          // A spot listing without a perpetual is a 400 here, not an
+          // outage — the metric just drops out, as designed.
+        }
+      }
+
+      // The other two timeframes' RSI, so the blend matches the live score.
+      const rsiTimeframes: BacktestTimeframe[] = [timeframe];
+      for (const other of OTHER_RSI_TIMEFRAMES[timeframe]) {
+        try {
+          const otherCandles = await fetchBacktestCandles(token.id, other, apiKey, windowDays);
+          const series = rsiSeriesFor(otherCandles, other);
+          if (series.length > 0) {
+            external[RSI_SERIES_ID[other]] = series;
+            rsiTimeframes.push(other);
+          }
+        } catch {
+          // Missing a timeframe just narrows the blend; combineRsi
+          // renormalizes over whichever ones arrived.
+        }
+      }
+
       const result = runScoreBacktest(candles, { timeframe, mode, external });
       const baseline = baselineFor(result, candles, `${token.id}:${timeframe}:score`, timeframe);
-      summaries.push({ tokenId: token.id, symbol: token.symbol, result, baseline, isDemo });
+      summaries.push({
+        tokenId: token.id,
+        symbol: token.symbol,
+        result,
+        baseline,
+        isDemo,
+        inputs: {
+          fearGreed: external.fearGreed !== undefined,
+          fundingRate: external.fundingRate !== undefined,
+          rsiTimeframes,
+        },
+      });
       setState((s) => ({ ...s, progress: { done: summaries.length, total: tokens.length }, summaries: [...summaries] }));
     }
 

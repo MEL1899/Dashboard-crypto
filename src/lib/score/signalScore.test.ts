@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { configForRegime } from "./config";
+import {
+  FUNDING_CLIP_HALF_WIDTH,
+  FUNDING_NEUTRAL_PCT_PER_DAY,
+  configForRegime,
+} from "./config";
 import {
   classifyScore,
   combineRsi,
@@ -12,16 +16,26 @@ import {
  * Inputs that should land every group exactly on neutral, used as the base
  * for the "vary one thing" tests below. Directions differ per metric
  * (config.ts), so a neutral input is not always a zero — RSI 50 and
- * Bollinger %b 0.5 are mid-range, funding 0 is mid-range of ±0.05, and MVRV
- * neutral is the midpoint of the -2..8 clip, which is 3.
+ * Bollinger %b 0.5 are mid-range, and MVRV neutral is the midpoint of the
+ * -2..8 clip, which is 3.
+ *
+ * Funding is the one that is emphatically NOT zero: its resting value is
+ * +0.03%/day (Binance's fixed 0.01% per 8h term), which is why these
+ * fixtures derive from the constants instead of hardcoding numbers. They
+ * used to hardcode 0 / ±0.05, which is exactly how the mis-centred clip
+ * range survived: the tests agreed with the bug.
  */
+const FUNDING_NEUTRAL = FUNDING_NEUTRAL_PCT_PER_DAY;
+/** Most bullish funding = cheapest to be long = the bottom of the range. */
+const FUNDING_BULLISH = FUNDING_NEUTRAL_PCT_PER_DAY - FUNDING_CLIP_HALF_WIDTH;
+const FUNDING_BEARISH = FUNDING_NEUTRAL_PCT_PER_DAY + FUNDING_CLIP_HALF_WIDTH;
 const NEUTRAL_INPUTS: ScoreMetricInputs = {
   rsi: { "1h": 50, "4h": 50, "1d": 50 },
   bollingerPercentB: 0.5,
   macdHistogram: 0,
   emaDistance: 0,
   mvrvZScore: 3,
-  fundingRate: 0,
+  fundingRate: FUNDING_NEUTRAL,
   exchangeNetflow: 0,
   fearGreed: 50,
 };
@@ -37,7 +51,7 @@ const BULLISH_INPUTS: ScoreMetricInputs = {
   macdHistogram: 1.5,
   emaDistance: 10,
   mvrvZScore: -2,
-  fundingRate: -0.05,
+  fundingRate: FUNDING_BULLISH,
   exchangeNetflow: -3,
   fearGreed: 0,
 };
@@ -48,7 +62,7 @@ const BEARISH_INPUTS: ScoreMetricInputs = {
   macdHistogram: -1.5,
   emaDistance: -10,
   mvrvZScore: 8,
-  fundingRate: 0.05,
+  fundingRate: FUNDING_BEARISH,
   exchangeNetflow: 3,
   fearGreed: 100,
 };
@@ -208,11 +222,75 @@ describe("computeSignalScore", () => {
   it("renormalizes metric weights within a partially-filled group", () => {
     // Only funding rate present, at its most bullish: the on-chain group
     // should read 100, not 100/3.
-    const result = computeSignalScore({ fundingRate: -0.05 });
+    const result = computeSignalScore({ fundingRate: FUNDING_BULLISH });
     const onchain = result.groups.find((g) => g.id === "onchain");
     expect(onchain?.score).toBe(100);
     expect(onchain?.missingMetrics).toEqual(["mvrvZScore", "exchangeNetflow"]);
     expect(onchain?.metrics[0].effectiveWeight).toBeCloseTo(1, 6);
+  });
+
+  it("shrinks a group's weight in proportion to what was missing from it", () => {
+    // The real-world case this was written for: MVRV and exchange netflow
+    // have no free data source, so on-chain is funding alone. Before this,
+    // funding inherited the group's entire 1/3 and became the heaviest
+    // metric in the score — heavier than RSI and Bollinger combined —
+    // purely as a side effect of renormalization. Nobody chose that.
+    const result = computeSignalScore({
+      ...NEUTRAL_INPUTS,
+      mvrvZScore: null,
+      exchangeNetflow: null,
+    });
+
+    const onchain = result.groups.find((g) => g.id === "onchain");
+    const technical = result.groups.find((g) => g.id === "technical");
+    expect(onchain?.coverage).toBeCloseTo(1 / 3, 6);
+
+    // 1/3 of a group that itself only ran a third: (1/3 × 1/3) against two
+    // full groups at 1/3 each.
+    const expectedOnchain = 1 / 9 / (1 / 3 + 1 / 9 + 1 / 3);
+    expect(onchain?.effectiveWeight).toBeCloseTo(expectedOnchain, 6);
+    // ~14%, not the 33% it used to silently claim.
+    expect(onchain?.effectiveWeight).toBeLessThan(0.15);
+
+    // And the confidence it lost went to the groups that do have data.
+    expect(technical?.effectiveWeight).toBeGreaterThan(1 / 3);
+  });
+
+  it("leaves every weight exactly as configured when nothing is missing", () => {
+    // The demotion above must be invisible on full data, or it would be a
+    // silent rebalancing of the whole formula rather than a fix.
+    const result = computeSignalScore(NEUTRAL_INPUTS);
+    for (const group of result.groups) {
+      expect(group.coverage).toBe(1);
+      expect(group.effectiveWeight).toBeCloseTo(1 / 3, 6);
+    }
+  });
+
+  it("measures group coverage by weight, not by how many metrics are missing", () => {
+    // Losing RSI (35% of the technical group) has to hurt more than losing
+    // MACD (15%), even though both are one metric out of four.
+    const withoutRsi = computeSignalScore({ ...NEUTRAL_INPUTS, rsi: null });
+    const withoutMacd = computeSignalScore({ ...NEUTRAL_INPUTS, macdHistogram: null });
+    const coverage = (r: typeof withoutRsi) =>
+      r.groups.find((g) => g.id === "technical")?.coverage as number;
+    expect(coverage(withoutRsi)).toBeCloseTo(0.65, 6);
+    expect(coverage(withoutMacd)).toBeCloseTo(0.85, 6);
+  });
+
+  it("treats funding at Binance's resting rate as neutral, not bearish", () => {
+    // The calibration bug this constant exists to prevent: the clip range
+    // used to be centred on zero, so +0.03%/day — the fixed 0.01%-per-8h
+    // term every USDT perpetual carries when the market is saying nothing —
+    // normalized to 20/100 and dragged roughly 12 points off every score.
+    const onchainScore = (fundingRate: number) =>
+      computeSignalScore({ fundingRate }).groups.find((g) => g.id === "onchain")?.score;
+
+    expect(onchainScore(FUNDING_NEUTRAL)).toBeCloseTo(50, 6);
+    expect(onchainScore(FUNDING_NEUTRAL + 0.02)).toBeLessThan(50);
+    expect(onchainScore(FUNDING_NEUTRAL - 0.02)).toBeGreaterThan(50);
+    // Zero funding is genuinely cheap leverage, so it should read bullish
+    // rather than neutral.
+    expect(onchainScore(0)).toBeGreaterThan(50);
   });
 
   it("reports coverage as the share of configured metrics actually supplied", () => {
@@ -244,7 +322,7 @@ describe("computeSignalScore", () => {
     expect(overbought.score).toBeLessThan(50);
 
     // Positive funding = crowded long = bearish.
-    expect(computeSignalScore({ fundingRate: 0.04 }).score).toBeLessThan(50);
+    expect(computeSignalScore({ fundingRate: FUNDING_NEUTRAL + 0.01 }).score).toBeLessThan(50);
     // Coins leaving exchanges = bullish.
     expect(computeSignalScore({ exchangeNetflow: -2 }).score).toBeGreaterThan(50);
     // Fear & Greed is read contrarian: extreme greed is the warning,

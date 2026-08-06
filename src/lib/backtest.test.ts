@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { MAX_RISK_PER_TRADE_PCT } from "./score/riskManagement";
 import {
   ROUND_TRIP_COST_PCT,
+  RSI_SERIES_ID,
   alignExternalSeries,
+  rsiSeriesFor,
   runRandomBaseline,
   runRsiOnlyBacktest,
   runScoreBacktest,
@@ -453,6 +455,78 @@ describe("alignExternalSeries", () => {
 
   it("handles no series at all", () => {
     expect(alignExternalSeries(candles, {})).toEqual([{}, {}, {}, {}, {}]);
+  });
+
+  describe("aligned to the decision moment (the candle's close)", () => {
+    it("picks up an intra-period value the open-aligned lookup would have missed", () => {
+      // An hourly RSI stamped mid-day IS known by the time the daily candle
+      // closes, and a daily strategy that trades on the close should see it.
+      const aligned = alignExternalSeries(candles, { rsi1h: [{ time: DAY / 2, value: 71 }] }, DAY);
+      // Candle 0 spans [0, DAY): the mid-day reading lands inside it.
+      expect(aligned[0].rsi1h).toBe(71);
+      // Without the offset it would have been invisible until candle 1.
+      expect(alignExternalSeries(candles, { rsi1h: [{ time: DAY / 2, value: 71 }] })[0].rsi1h).toBeNull();
+    });
+
+    it("still refuses a value stamped exactly at the NEXT candle's open", () => {
+      // The boundary case that makes this safe: Fear & Greed publishes at
+      // midnight, which is the same instant a daily candle closes. Letting
+      // that through would be a full day of lookahead disguised as a tie.
+      const aligned = alignExternalSeries(candles, { fng: [{ time: DAY, value: 99 }] }, DAY);
+      expect(aligned[0].fng).toBeNull();
+      expect(aligned[1].fng).toBe(99);
+    });
+
+    it("leaves the existing day-open cadence unchanged", () => {
+      // Same expectations as the open-aligned test above — proof the offset
+      // did not quietly shift every daily series forward by one candle.
+      const series = {
+        fng: [
+          { time: 0, value: 10 },
+          { time: 2 * DAY, value: 20 },
+          { time: 4 * DAY, value: 30 },
+        ],
+      };
+      expect(alignExternalSeries(candles, series, DAY).map((r) => r.fng)).toEqual([10, 10, 20, 20, 30]);
+    });
+  });
+});
+
+describe("rsiSeriesFor", () => {
+  it("stamps each reading at its source candle's close, not its open", () => {
+    // The reading does not exist until the bar it is computed from has
+    // finished. Stamping it at the open would hand a daily decision an RSI
+    // from a bar that was still forming.
+    const hourly = makeCandles(
+      Array.from({ length: 40 }, (_, i) => 100 + Math.sin(i) * 5),
+      0,
+      3600,
+    );
+    const series = rsiSeriesFor(hourly, "1h");
+    expect(series.length).toBeGreaterThan(0);
+    for (const point of series) {
+      // Every timestamp lands exactly one interval past a candle's open.
+      expect(hourly.some((c) => c.time + 3600 === point.time)).toBe(true);
+    }
+  });
+
+  it("feeds the score backtest a genuinely different blend from single-timeframe", () => {
+    // If supplying the extra series changed nothing, the whole multi-
+    // timeframe wiring would be decoration.
+    const daily = makeCandles(syntheticSeries(400));
+    const hourly = makeCandles(
+      syntheticSeries(400 * 6).map((v, i) => v + Math.sin(i / 5)),
+      0,
+      4 * 3600,
+    );
+
+    const alone = runScoreBacktest(daily, { timeframe: "1d" });
+    const blended = runScoreBacktest(daily, {
+      timeframe: "1d",
+      external: { [RSI_SERIES_ID["4h"]]: rsiSeriesFor(hourly, "4h") },
+    });
+
+    expect(blended.trades.length).not.toBe(alone.trades.length);
   });
 });
 

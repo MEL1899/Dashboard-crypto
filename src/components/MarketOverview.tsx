@@ -1,11 +1,13 @@
 import { useState, type ReactNode } from "react";
 import clsx from "clsx";
-import { Info } from "lucide-react";
+import { AlertTriangle, Info } from "lucide-react";
 import type { BollingerBands, Candle, MarketToken } from "../types";
 import { bbSignal } from "../lib/indicators";
 import type { RelativeStrengthSignal, TrendSignal } from "../lib/indicators";
 import type { BbPosition, MacdSignal, SignalTimeframe } from "../lib/indicators";
 import type { TokenSignals } from "../hooks/useWatchlistSignals";
+import type { MarketRegime } from "../lib/score/config";
+import type { ReadingAction } from "../lib/score/interpretation";
 import type { Currency } from "../lib/currency";
 import { Badge, Card, formatMoney, formatPrice, ScoreBadge, ScoreSparkline } from "./common";
 import { ScoreMethodologyPanel } from "./ScoreMethodologyPanel";
@@ -21,6 +23,22 @@ const TIMEFRAME_LABEL: Record<SignalTimeframe, string> = {
 const TIMEFRAME_ORDER: SignalTimeframe[] = ["1h", "4h", "1d", "1w", "1M"];
 
 type Tone = "up" | "down" | "neutral";
+
+/** Colour of the headline reading. "caution" is deliberately the same red
+ * as a sell: a buy the trend contradicts is a warning, not a soft buy. */
+const READING_TONE: Record<ReadingAction, string> = {
+  buy: "text-[var(--color-up)]",
+  sell: "text-[var(--color-down)]",
+  caution: "text-[var(--color-down)]",
+  wait: "text-[var(--color-text)]",
+};
+
+const REGIME_BADGE: Record<MarketRegime, string> = {
+  uptrend: "Tendência de alta",
+  downtrend: "Tendência de baixa",
+  range: "Mercado lateral",
+  unknown: "Regime não classificado",
+};
 
 const MACD_LABEL: Record<MacdSignal, string> = { bullish: "Alta", bearish: "Baixa", neutral: "Neutro" };
 const BB_LABEL: Record<BbPosition, string> = {
@@ -187,6 +205,43 @@ export function MarketOverview({
               </span>
             )}
           </p>
+        )}
+
+        {/* The reading: score + regime turned into one call. Separate from
+            the number on purpose — see lib/score/interpretation.ts. */}
+        {token && signals && (
+          <div
+            className={clsx(
+              "mt-3 rounded-lg border p-3",
+              signals.reading.regimeConflict
+                ? "border-[var(--color-down)]/40 bg-[var(--color-down)]/10"
+                : "border-[var(--color-border)] bg-[var(--color-surface-2)]",
+            )}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              {signals.reading.regimeConflict && (
+                <AlertTriangle size={14} className="shrink-0 text-[var(--color-down)]" />
+              )}
+              <span
+                className={clsx(
+                  "text-sm font-semibold",
+                  READING_TONE[signals.reading.action],
+                )}
+              >
+                {signals.reading.label}
+              </span>
+              <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-[var(--color-text-dim)]">
+                {REGIME_BADGE[signals.regime.regime]}
+              </span>
+            </div>
+            <p className="mt-1.5 text-xs leading-relaxed text-[var(--color-text-dim)]">
+              {signals.reading.detail}
+            </p>
+            <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-dim)] opacity-80">
+              {signals.regime.reason} Descreve o estado atual do mercado — não é previsão de que
+              ele vai lateralizar.
+            </p>
+          </div>
         )}
 
         {token && signals && (

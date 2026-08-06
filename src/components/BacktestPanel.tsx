@@ -13,7 +13,7 @@ import {
   type ExitReason,
 } from "../lib/backtest";
 import { BACKTEST_WINDOW_OPTIONS } from "../lib/backtestData";
-import { useBacktestAll, type BacktestSummary } from "../hooks/useBacktestAll";
+import { useBacktestAll, type BacktestSummary, type RunInputs } from "../hooks/useBacktestAll";
 import { useRsiBacktestAll, type RsiBacktestSummary } from "../hooks/useRsiBacktestAll";
 import { Card, Spinner, formatPrice } from "./common";
 
@@ -60,6 +60,33 @@ const EXIT_REASON_LABEL: Record<ExitReason, string> = {
 /** "DD/MM/AAAA a DD/MM/AAAA (N dias)" for the exact period the trades were
  * actually simulated over — the warmup candles aren't included, since no
  * trade can happen during them. */
+/**
+ * Says which of the score's inputs this run actually had.
+ *
+ * Without it the backtest silently tests a smaller score than the app
+ * displays and reports the result as if they were the same thing. That was
+ * real: with funding and the extra RSI timeframes missing, the same candles
+ * scored 57.2 in the backtest and 44.8 in the Mercado tab.
+ */
+function RunInputsNote({ inputs }: { inputs: RunInputs }) {
+  const missing: string[] = [];
+  if (!inputs.fearGreed) missing.push("Fear & Greed (grupo sentimento)");
+  if (!inputs.fundingRate) missing.push("funding rate (grupo on-chain)");
+
+  const blend = inputs.rsiTimeframes.join(" + ");
+  const fullBlend = inputs.rsiTimeframes.length >= 3;
+
+  return (
+    <p className="text-xs leading-relaxed text-[var(--color-text-dim)]">
+      <strong>O que este teste usou:</strong> RSI de {blend}
+      {fullBlend ? " (mesmo blend da aba Mercado)" : " — a aba Mercado usa 1h + 4h + 1d"}.{" "}
+      {missing.length === 0
+        ? "Todas as fontes externas do score estavam disponíveis, então o score testado é o mesmo que o app exibe (MVRV e exchange netflow continuam sem fonte gratuita nos dois)."
+        : `Sem ${missing.join(" e sem ")} nesta rodada — esses grupos saíram do cálculo, então o score testado aqui é menor que o exibido na aba Mercado.`}
+    </p>
+  );
+}
+
 function dateRangeLabel(result: BacktestResult): string | null {
   if (result.equityCurve.length === 0) return null;
   const first = result.equityCurve[0].time;
@@ -94,6 +121,9 @@ interface SelectedDetail {
   baseline: BacktestResult;
   isDemo: boolean;
   timeframe: BacktestTimeframe;
+  /** Only for score runs — the RSI-only strategy doesn't use the score, so
+   * there is nothing about score inputs to disclose for it. */
+  inputs?: RunInputs;
 }
 
 /**
@@ -414,6 +444,7 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
       baseline: s.baseline,
       isDemo: s.isDemo,
       timeframe: lastRun.timeframe,
+      inputs: "inputs" in s ? s.inputs : undefined,
     });
   }
 
@@ -597,14 +628,20 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
             />
           </div>
 
+          {/* These two are per-POSITION percentages, while "Retorno da
+              estratégia" above is a percentage of CAPITAL. With positions
+              sized at a fraction of the account, the same "%" means very
+              different amounts of money in the two groups — labelling them
+              is the difference between "os custos comeram o lucro" and the
+              truth. */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <StatTile
-              label="Expectativa por trade"
+              label="Expectativa por trade (% da posição)"
               value={`${selected.result.expectancyPct >= 0 ? "+" : ""}${selected.result.expectancyPct.toFixed(2)}%`}
               tone={selected.result.expectancyPct >= 0 ? "up" : "down"}
             />
             <StatTile
-              label="Custo total pago"
+              label="Custo total pago (% da posição)"
               value={`-${selected.result.totalCostPct.toFixed(2)}%`}
               tone="down"
             />
@@ -614,6 +651,14 @@ export function BacktestPanel({ tokens, apiKey, currency }: BacktestPanelProps) 
               tone={selected.result.strategyReturnPct > selected.baseline.strategyReturnPct ? "neutral" : "down"}
             />
           </div>
+
+          <p className="text-xs leading-relaxed text-[var(--color-text-dim)]">
+            As duas primeiras métricas acima são <strong>% da posição</strong>, não do capital: cada
+            trade arrisca 1% da conta, então a posição é uma fração do capital e esses números não
+            se somam nem se comparam diretamente com o retorno da estratégia, que é % do capital.
+          </p>
+
+          {selected.inputs && <RunInputsNote inputs={selected.inputs} />}
 
           <Card title={`Curva de capital — ${selected.symbol} (${selected.sourceLabel})`}>
             {dateRangeLabel(selected.result) && (

@@ -1,12 +1,14 @@
 import { useMemo, useState } from "react";
 import clsx from "clsx";
-import { ArrowDown, ArrowUp, Star } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Star } from "lucide-react";
 import type { MarketToken } from "../types";
 import type { Currency } from "../lib/currency";
 import type { TokenSignals } from "../hooks/useWatchlistSignals";
 import type { ScoreHistory } from "../lib/scoreHistory";
 import { computeSignalScore } from "../lib/score/signalScore";
 import { evaluateConfluence } from "../lib/score/confluence";
+import { detectRegime } from "../lib/score/regime";
+import { interpretReading, type ReadingAction } from "../lib/score/interpretation";
 import { Badge, Card, ScoreBadge, ScoreSparkline, formatMoney, formatPrice } from "./common";
 
 type SortKey = "price" | "change24h" | "marketCap" | "volume24h";
@@ -76,6 +78,39 @@ const NEUTRAL_TIMEFRAME_SIGNAL = {
   trend: "neutral",
   relativeStrength: "inline",
 } as const;
+const READING_STYLE: Record<ReadingAction, string> = {
+  buy: "bg-[var(--color-up)]/15 text-[var(--color-up)]",
+  sell: "bg-[var(--color-down)]/15 text-[var(--color-down)]",
+  caution: "bg-[var(--color-down)]/15 text-[var(--color-down)]",
+  wait: "bg-white/5 text-[var(--color-text-dim)]",
+};
+
+/**
+ * The score's call once the market regime is taken into account: buy, sell,
+ * sideways, or "the trend contradicts this". Scannable across the whole
+ * watchlist, which is the point — a column of "compra" readings where three
+ * are actually "compra contra a tendência" is a very different morning.
+ *
+ * `title` carries the full sentence, since the pill only has room for the
+ * headline.
+ */
+function ReadingPill({ signals }: { signals: TokenSignals }) {
+  const { reading } = signals;
+  return (
+    <span
+      title={`${reading.detail} ${signals.regime.reason}`}
+      className={clsx(
+        "inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium",
+        READING_STYLE[reading.action],
+      )}
+    >
+      {reading.regimeConflict && <AlertTriangle size={10} className="shrink-0" />}
+      {reading.label}
+    </span>
+  );
+}
+
+const FALLBACK_SCORE = computeSignalScore({});
 const FALLBACK_SIGNALS: TokenSignals = {
   byTimeframe: {
     "1h": NEUTRAL_TIMEFRAME_SIGNAL,
@@ -86,8 +121,10 @@ const FALLBACK_SIGNALS: TokenSignals = {
   },
   // Built by the real functions on empty input rather than hand-written, so
   // this placeholder can't drift out of shape as the result type grows.
-  score: computeSignalScore({}),
+  score: FALLBACK_SCORE,
   confluence: evaluateConfluence([]),
+  regime: detectRegime([]),
+  reading: interpretReading(FALLBACK_SCORE.level, "unknown"),
   isDemo: true,
 };
 
@@ -126,7 +163,7 @@ function WatchlistTable({
     <>
       {/* Desktop/tablet: full table. Mobile: stacked cards (below). */}
       <div className="hidden overflow-x-auto md:block">
-        <table className="w-full min-w-[820px] text-left text-xs">
+        <table className="w-full min-w-[980px] text-left text-xs">
           <thead className="text-[var(--color-text-dim)]">
             <tr>
               <th className="py-1.5 pr-2 font-medium">Ativo</th>
@@ -148,6 +185,7 @@ function WatchlistTable({
               <th className="py-1.5 pr-2 text-center font-medium">RSI 1S</th>
               <th className="py-1.5 pr-2 text-center font-medium">RSI 1M</th>
               <th className="py-1.5 pr-2 font-medium">Score</th>
+              <th className="py-1.5 pr-2 font-medium">Leitura</th>
             </tr>
           </thead>
           <tbody>
@@ -225,6 +263,9 @@ function WatchlistTable({
                       <ScoreSparkline points={scoreHistoryByToken[token.id] ?? []} />
                     </span>
                   </td>
+                  <td className="py-1.5 pr-2">
+                    <ReadingPill signals={signals} />
+                  </td>
                 </tr>
               );
             })}
@@ -277,6 +318,8 @@ function WatchlistTable({
                   <ScoreSparkline points={scoreHistoryByToken[token.id] ?? []} />
                 </span>
               </div>
+
+              <ReadingPill signals={signals} />
 
               <div className="flex items-center justify-between gap-2">
                 <span className="num-mono text-base font-semibold text-[var(--color-text)]">

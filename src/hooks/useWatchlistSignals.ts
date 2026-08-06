@@ -5,6 +5,8 @@ import { fetchFearGreedIndex } from "../lib/fearGreed";
 import { buildScoreInputs, type CandlesByTimeframe } from "../lib/score/liveInputs";
 import { computeSignalScore, type SignalScoreResult } from "../lib/score/signalScore";
 import { evaluateConfluence, type ConfluenceResult } from "../lib/score/confluence";
+import { LIVE_MA_PERIOD, detectRegime, type RegimeResult } from "../lib/score/regime";
+import { interpretReading, type Reading } from "../lib/score/interpretation";
 import {
   bbSignal,
   calcBollingerBands,
@@ -35,6 +37,14 @@ export interface TokenSignals {
   /** Which groups agree, shown as a label beside the score and never folded
    * into it (see lib/score/confluence.ts). */
   confluence: ConfluenceResult;
+  /** Is the market trending or going sideways right now, read off the daily
+   * candles (ADX + long-MA slope). Describes the CURRENT state — it does not
+   * forecast that price will start ranging. */
+  regime: RegimeResult;
+  /** Score + regime turned into one plain-language call: compra, venda,
+   * lateral, or "cuidado, isso é contra a tendência". Also a label only —
+   * see lib/score/interpretation.ts. */
+  reading: Reading;
   /** true if at least one of the 3 timeframes fell back to mock data. */
   isDemo: boolean;
 }
@@ -77,9 +87,9 @@ async function fetchBtcCandlesByTimeframe(
   return out;
 }
 
-/** The enum-ised signal the legacy score needs, plus the raw candles the
- * layered score needs — one fetch serving both, since re-requesting the
- * same series per score would double the load on a rate-limited API. */
+/** The categorical readings the indicator table renders, plus the raw
+ * candles the score needs — one fetch serving both, since re-requesting the
+ * same series for each would double the load on a rate-limited API. */
 interface TimeframeFetch {
   signal: TimeframeSignal;
   candles: Candle[];
@@ -134,11 +144,20 @@ function buildTokenSignals(
   external: ExternalReadings,
   isDemo: boolean,
 ): TokenSignals {
-  const score = computeSignalScore(buildScoreInputs(candles, external));
+  // Read off the daily series: the regime question is "what is this market
+  // doing over weeks", not "what did the last few hours look like".
+  const regime = detectRegime(candles["1d"] ?? [], { maPeriod: LIVE_MA_PERIOD });
+  // Threaded into the score for forward compatibility. It changes nothing
+  // today — every regime maps to the same weights on purpose (config.ts) —
+  // but it means the result carries the regime it was computed under, which
+  // the transparency panel reads.
+  const score = computeSignalScore(buildScoreInputs(candles, external), regime.regime);
   return {
     byTimeframe,
     score,
     confluence: evaluateConfluence(score.groups),
+    regime,
+    reading: interpretReading(score.level, regime.regime),
     isDemo,
   };
 }
@@ -177,7 +196,8 @@ async function fetchTokenSignals(
     const result = results[i];
     if (result) {
       byTimeframe[tf] = result.signal;
-      // Only the three the layered score reads; 1w/1M feed the legacy one.
+      // Only the three the score reads. 1w/1M are fetched for the indicator
+      // table's own columns and deliberately stay out of the score.
       if (tf === "1h" || tf === "4h" || tf === "1d") candles[tf] = result.candles;
     } else {
       byTimeframe[tf] = fallback[tf];

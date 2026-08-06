@@ -50,14 +50,25 @@ export interface RiskGuidance {
 }
 
 export interface PositionSize {
-  /** Capital put at risk, in account currency. */
+  /** Capital actually put at risk, in account currency. Below the budgeted
+   * amount whenever `cappedByCapital` is true. */
   riskAmount: number;
-  /** Notional size of the position, in account currency. */
+  /** Notional size of the position, in account currency. Never above
+   * `capital` — this app does not size leveraged positions. */
   positionValue: number;
   /** Units of the asset. */
   units: number;
   /** Distance from entry to stop, as a % of entry. */
   stopDistancePct: number;
+  /** True when the unleveraged cap bound: the stop was close enough that
+   * risking the full budget would have required buying more than the
+   * account holds. The UI must say so — silently handing back a position
+   * bigger than the account is how a "risk calculator" becomes the thing
+   * that blows it up. */
+  cappedByCapital: boolean;
+  /** What the budget asked for before the cap, in account currency. Equal
+   * to `riskAmount` when the cap didn't bind. */
+  requestedRiskAmount: number;
 }
 
 export interface RiskGuidanceInput {
@@ -79,6 +90,18 @@ function clamp(value: number, min: number, max: number): number {
  * way round: you decide what you're willing to lose, the stop tells you how
  * far away "wrong" is, and those two together dictate the size. Sizing
  * first and placing the stop afterwards is how accounts die.
+ *
+ * Capped at the account's own capital. Without that cap the formula happily
+ * returns a $20,000 position on a $10,000 account whenever the stop is
+ * tighter than the risk budget — a 0.5% stop with 1% risk implies 2x
+ * leverage — and it returned it with no warning at all. The backtest has
+ * always capped this (`allocationForRisk` clamps to 1); the panel did not,
+ * so the one screen in the product whose entire job is to be conservative
+ * was the one quietly recommending margin.
+ *
+ * When the cap binds the trade simply risks less than budgeted, which is
+ * the safe direction to err — and `cappedByCapital` says so out loud rather
+ * than letting the smaller number look like the plan all along.
  */
 export function calculatePositionSize(
   capital: number,
@@ -90,13 +113,22 @@ export function calculatePositionSize(
   const stopDistance = Math.abs(entryPrice - stopPrice);
   if (stopDistance === 0) return null;
 
-  const riskAmount = capital * (riskPerTradePct / 100);
-  const units = riskAmount / stopDistance;
+  const requestedRiskAmount = capital * (riskPerTradePct / 100);
+  const requestedUnits = requestedRiskAmount / stopDistance;
+  const maxUnits = capital / entryPrice;
+
+  const cappedByCapital = requestedUnits > maxUnits;
+  const units = cappedByCapital ? maxUnits : requestedUnits;
+
   return {
-    riskAmount,
+    // Recomputed from the units actually taken, so it stays the truth about
+    // this position rather than the budget that was asked for.
+    riskAmount: units * stopDistance,
     positionValue: units * entryPrice,
     units,
     stopDistancePct: (stopDistance / entryPrice) * 100,
+    cappedByCapital,
+    requestedRiskAmount,
   };
 }
 

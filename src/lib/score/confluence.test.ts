@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { FUNDING_CLIP_HALF_WIDTH, FUNDING_NEUTRAL_PCT_PER_DAY } from "./config";
 import { classifyStance, evaluateConfluence } from "./confluence";
 import { computeSignalScore, type GroupContribution } from "./signalScore";
 
 function group(id: string, score: number | null): GroupContribution {
-  return { id, label: id, score, effectiveWeight: 0, metrics: [], missingMetrics: [] };
+  return { id, label: id, score, effectiveWeight: 0, coverage: 1, metrics: [], missingMetrics: [] };
 }
 
 describe("classifyStance", () => {
@@ -70,7 +71,9 @@ describe("evaluateConfluence", () => {
       macdHistogram: 1.5,
       emaDistance: 10,
       mvrvZScore: 8,
-      fundingRate: 0.05,
+      // The bearish end of funding's range, derived rather than hardcoded:
+      // the range is centred on +0.03%/day, not on zero (see config.ts).
+      fundingRate: FUNDING_NEUTRAL_PCT_PER_DAY + FUNDING_CLIP_HALF_WIDTH,
       exchangeNetflow: 3,
       // Contrarian reading, so extreme greed is the bearish sentiment end.
       fearGreed: 100,

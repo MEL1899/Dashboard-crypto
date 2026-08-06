@@ -1,7 +1,12 @@
 import type { Candle } from "../types";
-import { calcBollingerBands, calcMACD, calcRSI, calcSMA } from "./indicators";
+import { bollingerPercentB, calcBollingerBands, calcMACD, calcRSI, emaDistancePct } from "./indicators";
 import type { ScoreWeightConfig } from "./score/config";
-import { MAX_RISK_PER_TRADE_PCT, MIN_RISK_PER_TRADE_PCT } from "./score/riskManagement";
+import { LONG_EMA_PERIOD } from "./score/liveInputs";
+import {
+  MAX_RISK_PER_TRADE_PCT,
+  MIN_REWARD_RISK_RATIO,
+  MIN_RISK_PER_TRADE_PCT,
+} from "./score/riskManagement";
 import { classifyScore as classifySignalScore, computeSignalScore } from "./score/signalScore";
 
 /** Why a trade closed: "stop"/"target" fired intraday off the position's own
@@ -77,6 +82,14 @@ const EMPTY_RESULT: BacktestResult = {
  * produce enough trades to mean anything. */
 export type BacktestTimeframe = "1h" | "4h" | "1d";
 
+/** Length of one candle, in seconds — used to align external series to the
+ * moment a decision is actually taken (the candle's close, not its open). */
+export const TIMEFRAME_SECONDS: Record<BacktestTimeframe, number> = {
+  "1h": 3600,
+  "4h": 4 * 3600,
+  "1d": 24 * 3600,
+};
+
 // Needs enough candles for every indicator to produce a real read — the
 // binding constraint is the trend filter's 50-period SMA. Expressed in
 // candles (bars), not calendar time, same as real indicator periods — 50
@@ -102,8 +115,9 @@ const STOP_BOUNDS_PCT: Record<BacktestTimeframe, { min: number; max: number }> =
 };
 // If the nearest resistance/support is closer than this multiple of the
 // stop distance, the target is extended to it instead — no point risking
-// more than you stand to gain.
-const MIN_REWARD_RISK_RATIO = 2;
+// more than you stand to gain. Imported from score/riskManagement rather
+// than redeclared, so the simulation and the number the risk panel promises
+// the user cannot drift apart.
 /**
  * Risk per trade, as a % of equity — the doc's rule (section 4), and the
  * same band the risk panel shows the user.
@@ -243,6 +257,19 @@ type SignalFn = (ctx: SignalContext) => SignalAction;
 export function alignExternalSeries(
   candles: Candle[],
   series: ExternalSeriesInput,
+  /**
+   * Seconds after each candle's OPEN at which the decision is made. The
+   * simulation acts on the close, so passing the candle interval lets an
+   * intra-period series (an hourly RSI feeding a daily backtest) contribute
+   * the value that was genuinely known by then, instead of the stale one
+   * from the period's open.
+   *
+   * Still strictly causal: one second is subtracted so a point stamped
+   * exactly at the NEXT candle's open — the Fear & Greed reading published
+   * at midnight, say — is never visible to the candle that closes at that
+   * instant. Defaults to 0, which is align-at-open.
+   */
+  decisionOffsetSeconds = 0,
 ): Record<string, number | null>[] {
   const keys = Object.keys(series);
   const sorted: Record<string, { time: number; value: number }[]> = {};
@@ -251,11 +278,14 @@ export function alignExternalSeries(
   const cursors: Record<string, number> = {};
   for (const key of keys) cursors[key] = 0;
 
+  const horizon = decisionOffsetSeconds > 0 ? decisionOffsetSeconds - 1 : 0;
+
   return candles.map((candle) => {
     const row: Record<string, number | null> = {};
+    const asOf = candle.time + horizon;
     for (const key of keys) {
       const points = sorted[key];
-      while (cursors[key] < points.length && points[cursors[key]].time <= candle.time) {
+      while (cursors[key] < points.length && points[cursors[key]].time <= asOf) {
         cursors[key]++;
       }
       // cursors[key] now sits one past the last usable point.
@@ -456,7 +486,9 @@ function simulate(
   // too strict" rather than "the signal never fired".
   let rejectedEntries = 0;
 
-  const alignedExternal = alignExternalSeries(candles, external);
+  // Aligned to each candle's close, since that is when the signal is
+  // evaluated and the trade is taken.
+  const alignedExternal = alignExternalSeries(candles, external, TIMEFRAME_SECONDS[timeframe]);
 
   const trades: BacktestTrade[] = [];
   const equityCurve: BacktestPoint[] = [];
@@ -731,11 +763,42 @@ export function runRandomBaseline(
   );
 }
 
-/** Bollinger %b: 0 = price at the lower band, 1 = at the upper. */
-function percentB(price: number, band: { upper: number; lower: number }): number | null {
-  const width = band.upper - band.lower;
-  if (width <= 0) return null;
-  return (price - band.lower) / width;
+/**
+ * External-series keys carrying RSI from a timeframe other than the one
+ * being simulated, so the backtest can reproduce the live score's
+ * multi-timeframe RSI blend instead of testing a single-timeframe variant.
+ *
+ * They travel as ordinary external series, which means they inherit
+ * alignExternalSeries' no-lookahead guarantee for free: each point is
+ * stamped with the moment its source candle CLOSED, and a candle only ever
+ * sees points already closed by its own close.
+ */
+export const RSI_SERIES_ID = {
+  "1h": "rsi1h",
+  "4h": "rsi4h",
+  "1d": "rsi1d",
+} as const;
+
+/**
+ * Turns a candle series from one timeframe into the RSI series the score
+ * backtest can consume for a DIFFERENT timeframe.
+ *
+ * Each point is stamped with the source candle's CLOSE, not its open,
+ * because that is the instant the reading exists. Combined with the
+ * close-aligned lookup in simulate(), a daily decision therefore sees the
+ * last hourly RSI that had actually finished by then — never one from a
+ * bar still forming, and never one from the future.
+ */
+export function rsiSeriesFor(
+  candles: Candle[],
+  sourceTimeframe: BacktestTimeframe,
+  period = 14,
+): { time: number; value: number }[] {
+  const interval = TIMEFRAME_SECONDS[sourceTimeframe];
+  return calcRSI(candles, period).map((point) => ({
+    time: point.time + interval,
+    value: point.value,
+  }));
 }
 
 /**
@@ -793,21 +856,28 @@ export function runScoreBacktest(
       const macdSeries = calcMACD(window);
       const lastMacd = macdSeries[macdSeries.length - 1];
 
-      // Long-EMA proxy: the 50-period SMA the trend filter already uses,
-      // expressed as the price's distance from it in %.
-      const smaSeries = calcSMA(window, 50);
-      const lastSma = smaSeries[smaSeries.length - 1];
+      // The exact function the live score uses — not an SMA "proxy". It
+      // was an SMA here and an EMA in the app, which meant the backtest was
+      // measuring a slightly different score from the one on screen.
+      const emaDistance = emaDistancePct(window, LONG_EMA_PERIOD);
 
       const { score } = computeSignalScore(
         {
+          // The live score blends 1h/4h/1d. Any timeframe the caller
+          // supplied as an external RSI series is used here at its
+          // no-lookahead aligned value; the one the backtest is natively
+          // running on comes straight off the window. Without the extra
+          // series this degrades to a single-timeframe RSI — correct, just
+          // not the same blend the app shows, which is why useBacktestAll
+          // now supplies them.
           rsi: {
-            "1h": timeframe === "1h" ? rsiValue : null,
-            "4h": timeframe === "4h" ? rsiValue : null,
-            "1d": timeframe === "1d" ? rsiValue : null,
+            "1h": timeframe === "1h" ? rsiValue : (ext[RSI_SERIES_ID["1h"]] ?? null),
+            "4h": timeframe === "4h" ? rsiValue : (ext[RSI_SERIES_ID["4h"]] ?? null),
+            "1d": timeframe === "1d" ? rsiValue : (ext[RSI_SERIES_ID["1d"]] ?? null),
           },
-          bollingerPercentB: lastBb ? percentB(lastClose, lastBb) : null,
+          bollingerPercentB: lastBb ? bollingerPercentB(lastClose, lastBb) : null,
           macdHistogram: lastMacd ? (lastMacd.histogram / lastClose) * 100 : null,
-          emaDistance: lastSma ? ((lastClose - lastSma.value) / lastSma.value) * 100 : null,
+          emaDistance,
           mvrvZScore: ext.mvrvZScore,
           fundingRate: ext.fundingRate,
           exchangeNetflow: ext.exchangeNetflow,

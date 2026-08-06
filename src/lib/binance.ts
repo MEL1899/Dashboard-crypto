@@ -132,6 +132,42 @@ export async function fetchFundingRateDailyPct(symbol: string): Promise<number |
   }
 }
 
+export interface FundingPoint {
+  /** Unix seconds — the moment the funding was settled, so it is known
+   * from that instant onward and never before. */
+  time: number;
+  /** % per day, the same unit the score's clip range is written in. */
+  value: number;
+}
+
+/**
+ * Historical funding, oldest first, as % per day.
+ *
+ * Exists so the backtest can include the on-chain group at all. Without it
+ * the group had no metric, dropped out entirely, and the backtest silently
+ * measured a two-group score while the app displayed a three-group one —
+ * a 12-point gap on the same candles.
+ *
+ * Binance caps a single call at 1000 records; at one settlement every 8
+ * hours that is roughly 333 days, which covers a daily backtest and
+ * overshoots the shorter timeframes. Paginating further is possible but
+ * not worth it until the histories elsewhere are longer too.
+ */
+export async function fetchFundingRateHistory(symbol: string, limit = 1000): Promise<FundingPoint[]> {
+  const url = new URL(`${FUTURES_BASE}/fapi/v1/fundingRate`);
+  url.searchParams.set("symbol", symbol);
+  url.searchParams.set("limit", String(Math.min(limit, 1000)));
+
+  const rows = await getJson<{ fundingTime?: number; fundingRate?: string }[]>(url);
+  return rows
+    .map((row) => ({
+      time: Math.floor(Number(row.fundingTime) / 1000),
+      value: Number(row.fundingRate) * FUNDING_WINDOWS_PER_DAY * 100,
+    }))
+    .filter((p) => Number.isFinite(p.time) && Number.isFinite(p.value))
+    .sort((a, b) => a.time - b.time);
+}
+
 /** Batched live ticker for however many symbols we need in one call. */
 export async function fetchTickers(symbols: string[]): Promise<Record<string, SpotTicker>> {
   if (symbols.length === 0) return {};

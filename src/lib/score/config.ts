@@ -122,11 +122,42 @@ const TECHNICAL: GroupSpec = {
 };
 
 /**
+ * Funding rate at rest, in % per day.
+ *
+ * Binance's funding formula carries a fixed interest-rate term of 0.01% per
+ * 8-hour window for USDT perpetuals, so 0.03%/day is what funding reads when
+ * the market is saying nothing at all. It is the neutral point of the
+ * metric, and the clip range has to be centred on it.
+ *
+ * This was a real calibration bug: with the range centred on zero, a
+ * perfectly ordinary +0.03%/day normalized to 20/100 ("deeply bearish"),
+ * and since the on-chain group is usually funding alone it dragged roughly
+ * 12 points off every score, permanently, for no reason.
+ */
+export const FUNDING_NEUTRAL_PCT_PER_DAY = 0.03;
+/**
+ * Half-width of the funding clip range, in % per day. Kept at the original
+ * 0.05 — only the CENTRE was wrong. The width itself is still uncalibrated
+ * guesswork: it saturates at 0.08%/day, while a genuinely crowded market
+ * reaches several times that. Narrowing or widening it needs measurement,
+ * not another opinion.
+ */
+export const FUNDING_CLIP_HALF_WIDTH = 0.05;
+/** 0.03 - 0.05 is -0.020000000000000004 in binary floating point, and the
+ * transparency panel prints the clip bounds verbatim. Rounded to the
+ * hundredth of a basis point, which is far finer than any funding rate. */
+const roundFunding = (value: number): number => Math.round(value * 1e6) / 1e6;
+
+/**
  * On-chain group. v1 uses only the three metrics obtainable from free or
  * public APIs, at equal weight. SOPR, Puell Multiple and Reserve Risk are
  * defined in the research doc (section 2) and are the intended v2 additions
  * — adding one is a matter of appending a MetricSpec here and rebalancing
  * the weights.
+ *
+ * In practice only funding has a live source today: MVRV and exchange
+ * netflow have no free feed. See signalScore.ts for why that does NOT leave
+ * funding carrying the group's whole 1/3.
  */
 const ONCHAIN: GroupSpec = {
   id: "onchain",
@@ -150,10 +181,15 @@ const ONCHAIN: GroupSpec = {
       weight: 1 / 3,
       // Sustained positive funding = crowded long = top risk.
       direction: "inverted",
-      clip: { min: -0.05, max: 0.05 },
+      // Centrado em FUNDING_NEUTRAL_PCT_PER_DAY, NÃO em zero — ver a
+      // constante abaixo. Zero não é o repouso deste mercado.
+      clip: {
+        min: roundFunding(FUNDING_NEUTRAL_PCT_PER_DAY - FUNDING_CLIP_HALF_WIDTH),
+        max: roundFunding(FUNDING_NEUTRAL_PCT_PER_DAY + FUNDING_CLIP_HALF_WIDTH),
+      },
       unit: "% ao dia",
       rationale:
-        "Clipado num range simétrico e invertido: funding muito positivo indica excesso de alavancagem comprada (risco de topo); muito negativo, risco de short squeeze. Atenção ao viés estrutural — a BitMEX mediu funding positivo em 92% do tempo.",
+        "Invertido: funding acima do normal indica excesso de alavancagem comprada (risco de topo); abaixo, risco de short squeeze. A faixa é centrada em +0,03% ao dia, que é o funding de repouso da Binance (0,01% por janela de 8h), e não em zero — centrar em zero fazia um mercado perfeitamente normal pontuar 20/100. Atenção ao viés estrutural: a BitMEX mediu funding positivo em 92% do tempo.",
     },
     {
       id: "exchangeNetflow",
@@ -257,15 +293,15 @@ export interface ScoreWeightConfig {
  * change in WEIGHTS_BY_REGIME, not a change to any scoring function.
  */
 /*
- * PRÓXIMO ITEM (só depois do A/B do F&G — não implementar antes):
- * detecção de regime via ADX ou inclinação da EMA de 200 períodos.
+ * FEITO: a detecção de regime existe (score/regime.ts, via ADX + inclinação
+ * da média longa) e está ligada ao app — useWatchlistSignals a calcula e
+ * score/interpretation.ts a usa para qualificar o score.
  *
- * É a camada de regime, e não o ajuste fino de pesos entre grupos, que
- * resolve de verdade o risco de "faca caindo" — o sistema é contrário em
- * todos os três grupos (RSI/Bollinger, MVRV e agora F&G), e um sistema
- * contrário puro compra cedo demais em bear market forte. Saber que o
- * regime é de baixa é o que permite exigir mais convicção antes de comprar
- * o repique, em vez de tentar compensar isso com peso.
+ * O que ela NÃO faz, deliberadamente: mudar peso nenhum. O regime resolve o
+ * risco de "faca caindo" avisando que uma compra é contra a tendência, e
+ * isso é um rótulo. Mexer nos pesos por regime seria calibrar sem medição,
+ * exatamente o que o resto deste arquivo evita — e os pesos por regime
+ * continuam idênticos por isso.
  */
 export type MarketRegime = "uptrend" | "downtrend" | "range" | "unknown";
 

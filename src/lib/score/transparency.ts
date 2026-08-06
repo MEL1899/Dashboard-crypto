@@ -19,10 +19,24 @@ import type { SignalScoreResult } from "./signalScore";
 export interface ExplainedMetric {
   id: string;
   label: string;
-  /** Weight inside its group, as a %. */
+  /** Weight inside its group, as a %, as CONFIGURED. */
   weightPct: number;
-  /** Weight in the final score, as a % (group weight × metric weight). */
+  /** Weight in the final score, as a %, as CONFIGURED (group × metric).
+   * What the formula intends when every metric has data. */
   overallWeightPct: number;
+  /**
+   * Weight this metric ACTUALLY carried in the run being explained, as a %.
+   * Present only when explaining a real result, and different from
+   * `overallWeightPct` whenever siblings dropped out.
+   *
+   * This distinction is the whole point of the panel. Showing only the
+   * configured number was a real defect: with MVRV and netflow permanently
+   * unavailable, the panel published "Funding Rate — 11.1% do total" while
+   * funding was in fact carrying 33.3%. A transparency panel that discloses
+   * the intended weights and calls them the real ones is worse than no
+   * panel, because it is confidently wrong.
+   */
+  effectiveWeightPct?: number;
   direction: MetricDirection;
   directionLabel: string;
   clip: { min: number; max: number };
@@ -35,7 +49,13 @@ export interface ExplainedMetric {
 export interface ExplainedGroup {
   id: string;
   label: string;
+  /** As configured. */
   weightPct: number;
+  /** What the group actually weighed in the explained run, after being
+   * scaled by its coverage. Present only when explaining a real result. */
+  effectiveWeightPct?: number;
+  /** Share of this group's configured metric weight that had data, as a %. */
+  coveragePct?: number;
   metrics: ExplainedMetric[];
   /** Present only when explaining an actual run. */
   currentScore?: number | null;
@@ -62,7 +82,8 @@ const METHODOLOGY_NOTES = [
   "Os 3 grupos têm peso igual (1/3 cada). Pesos iguais são a escolha mais defensável enquanto não houver dado próprio para calibrar via PCA ou regressão (OECD Handbook on Constructing Composite Indicators).",
   "Cada métrica é normalizada para 0-100 (0 = extremamente baixista, 50 = neutro, 100 = extremamente altista) antes de qualquer ponderação.",
   "Dentro do grupo técnico, RSI e Bollinger pesam mais que MACD porque superaram o MACD em estudos independentes; o MACD foi o pior indicador em três deles.",
-  "Métricas indisponíveis são descartadas e os pesos restantes são renormalizados — a cobertura indica quanto da fórmula rodou de fato.",
+  "Métricas indisponíveis são descartadas e os pesos restantes são renormalizados — quando isso acontece, o painel mostra o peso real ao lado do peso configurado.",
+  "O peso de um grupo é reduzido na proporção do que faltou nele: um grupo com metade das métricas sem dado entra com metade do peso, e a diferença vai para os grupos que têm dado. Sem isso, a última métrica de um grupo herdava o peso do grupo inteiro.",
   "Confluência entre os grupos é mostrada como rótulo separado e NÃO entra na conta: não há estudo publicado validando que confluência aumente o win rate.",
   "Os limites de normalização são ponto de partida, não valores definitivos — devem ser calibrados com dado histórico real.",
 ];
@@ -99,6 +120,12 @@ export function explainScore(
               currentValue: runMetric
                 ? { raw: runMetric.rawValue, normalized: runMetric.normalized }
                 : null,
+              // Taken from the run, not recomputed: the metric's share of
+              // its group times the group's share of the score, both after
+              // renormalization. A metric with no data carried 0.
+              effectiveWeightPct: runMetric
+                ? runMetric.effectiveWeight * (runGroup?.effectiveWeight ?? 0) * 100
+                : 0,
             }
           : {}),
       };
@@ -109,7 +136,14 @@ export function explainScore(
       label: groupSpec.label,
       weightPct: groupSpec.weight * 100,
       metrics,
-      ...(result ? { currentScore: runGroup?.score ?? null, missingMetrics: runGroup?.missingMetrics ?? [] } : {}),
+      ...(result
+        ? {
+            currentScore: runGroup?.score ?? null,
+            missingMetrics: runGroup?.missingMetrics ?? [],
+            effectiveWeightPct: (runGroup?.effectiveWeight ?? 0) * 100,
+            coveragePct: (runGroup?.coverage ?? 0) * 100,
+          }
+        : {}),
     };
   });
 

@@ -48,8 +48,23 @@ function MetricRow({ metric, hasResult }: { metric: ExplainedMetric; hasResult: 
     <div className="border-t border-[var(--color-border)] py-2.5">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <span className="text-xs font-medium text-[var(--color-text)]">{metric.label}</span>
+        {/* The effective figure leads whenever it differs, because it is
+            the one that actually produced the number on screen. The
+            configured one stays visible so the gap is auditable. */}
         <span className="num-mono text-[11px] text-[var(--color-text-dim)]">
-          {metric.weightPct.toFixed(0)}% do grupo · {metric.overallWeightPct.toFixed(1)}% do total
+          {metric.effectiveWeightPct !== undefined &&
+          Math.abs(metric.effectiveWeightPct - metric.overallWeightPct) >= 0.1 ? (
+            <>
+              <span className="font-medium text-[var(--color-text)]">
+                {metric.effectiveWeightPct.toFixed(1)}% do total agora
+              </span>{" "}
+              · {metric.overallWeightPct.toFixed(1)}% configurado
+            </>
+          ) : (
+            <>
+              {metric.weightPct.toFixed(0)}% do grupo · {metric.overallWeightPct.toFixed(1)}% do total
+            </>
+          )}
         </span>
       </div>
 
@@ -94,7 +109,17 @@ function GroupSection({ group, hasResult }: { group: ExplainedGroup; hasResult: 
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h4 className="text-sm font-semibold text-[var(--color-text)]">{group.label}</h4>
         <span className="num-mono text-xs text-[var(--color-text-dim)]">
-          {group.weightPct.toFixed(1)}% do score
+          {group.effectiveWeightPct !== undefined &&
+          Math.abs(group.effectiveWeightPct - group.weightPct) >= 0.1 ? (
+            <>
+              <span className="font-medium text-[var(--color-text)]">
+                {group.effectiveWeightPct.toFixed(1)}% do score agora
+              </span>{" "}
+              · {group.weightPct.toFixed(1)}% configurado
+            </>
+          ) : (
+            <>{group.weightPct.toFixed(1)}% do score</>
+          )}
         </span>
       </div>
 
@@ -109,6 +134,12 @@ function GroupSection({ group, hasResult }: { group: ExplainedGroup; hasResult: 
                 </span>
               </div>
               <ScoreBar value={group.currentScore} />
+              {group.coveragePct !== undefined && group.coveragePct < 99.9 && (
+                <p className="mt-1 text-[11px] text-[var(--color-text-dim)]">
+                  Só {group.coveragePct.toFixed(0)}% deste grupo tinha dado, então ele entrou com peso
+                  reduzido — o restante foi para os grupos que têm dado.
+                </p>
+              )}
             </>
           ) : (
             <p className="text-xs text-[var(--color-text-dim)]">

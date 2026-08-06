@@ -41,6 +41,45 @@ describe("calculatePositionSize", () => {
     expect(tight!.riskAmount).toBeCloseTo(wide!.riskAmount, 6);
   });
 
+  it("never recommends a position larger than the account", () => {
+    // A 0.5%-away stop with a 1% risk budget implies 2x leverage. The panel
+    // used to return exactly that — a $20,000 position on a $10,000 account
+    // — with no warning at all, which is a risk calculator recommending
+    // margin to someone who never asked for it.
+    const size = calculatePositionSize(10_000, 100, 99.5, 1);
+    expect(size?.positionValue).toBeCloseTo(10_000, 6);
+    expect(size?.cappedByCapital).toBe(true);
+    // Capped means risking LESS than budgeted, which is the safe direction.
+    expect(size?.requestedRiskAmount).toBeCloseTo(100, 6);
+    expect(size?.riskAmount).toBeCloseTo(50, 6);
+    expect(size!.riskAmount).toBeLessThan(size!.requestedRiskAmount);
+  });
+
+  it("leaves an ordinary setup untouched and says the cap did not bind", () => {
+    const size = calculatePositionSize(10_000, 100, 95, 1);
+    expect(size?.cappedByCapital).toBe(false);
+    expect(size?.riskAmount).toBeCloseTo(size!.requestedRiskAmount, 6);
+  });
+
+  it("caps a short the same way", () => {
+    const size = calculatePositionSize(10_000, 100, 100.5, 1);
+    expect(size?.positionValue).toBeCloseTo(10_000, 6);
+    expect(size?.cappedByCapital).toBe(true);
+  });
+
+  it("agrees with the backtest's own sizing rule", () => {
+    // The simulation caps allocation at 1 (allocationForRisk in
+    // backtest.ts). If these two ever disagree the app is testing one rule
+    // and recommending another.
+    const capital = 10_000;
+    for (const stop of [80, 90, 95, 99, 99.5, 99.9]) {
+      const size = calculatePositionSize(capital, 100, stop, 1)!;
+      const allocation = size.positionValue / capital;
+      expect(allocation).toBeLessThanOrEqual(1 + 1e-9);
+      expect(allocation).toBeCloseTo(Math.min(1, 1 / size.stopDistancePct), 6);
+    }
+  });
+
   it("works the same for a short, where the stop sits above the entry", () => {
     const size = calculatePositionSize(10_000, 100, 105, 1);
     expect(size?.units).toBeCloseTo(20, 6);

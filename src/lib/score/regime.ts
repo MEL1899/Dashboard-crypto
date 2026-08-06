@@ -33,6 +33,16 @@ export const FLAT_SLOPE_PCT = 1;
 
 export const DEFAULT_ADX_PERIOD = 14;
 export const DEFAULT_MA_PERIOD = 200;
+/**
+ * Long-MA period used by the live app.
+ *
+ * 200 is the textbook figure but needs 220 candles, and the app fetches 180
+ * daily ones — with the default the live reading would have been "unknown"
+ * forever, which is how a detector ends up silently doing nothing. 100
+ * needs 120 candles, fits comfortably, and is still long enough that a
+ * couple of sharp days don't flip its slope.
+ */
+export const LIVE_MA_PERIOD = 100;
 
 export interface RegimeResult {
   regime: MarketRegime;

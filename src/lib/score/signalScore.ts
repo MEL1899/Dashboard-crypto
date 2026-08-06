@@ -73,8 +73,13 @@ export interface GroupContribution {
   label: string;
   /** 0-100 for this group alone, or null when no metric was available. */
   score: number | null;
-  /** Weight actually applied, after renormalizing for missing groups. */
+  /** Weight actually applied, after scaling by coverage and renormalizing
+   * over the surviving groups. Compare against the configured weight to see
+   * how much a group was demoted for missing data. */
   effectiveWeight: number;
+  /** Share of this group's configured metric weight that had data, 0-1.
+   * Drives the demotion above. */
+  coverage: number;
   metrics: MetricContribution[];
   /** Metrics defined in config but not supplied for this run. */
   missingMetrics: string[];
@@ -189,6 +194,10 @@ export function computeSignalScore(
     // metrics still produce a properly weighted 0-100 group score instead
     // of one silently dragged toward zero by the missing third.
     const weightSum = present.reduce((sum, m) => sum + m.spec.weight, 0);
+    const configuredWeightSum = groupSpec.metrics.reduce((sum, m) => sum + m.weight, 0);
+    // Measured by weight, not by count: losing the 60%-weight metric out of
+    // three is a much bigger hole than losing a 20% one.
+    const coverage = configuredWeightSum > 0 ? weightSum / configuredWeightSum : 0;
     const metrics: MetricContribution[] = present.map(({ spec, rawValue }) => ({
       id: spec.id,
       label: spec.label,
@@ -207,21 +216,39 @@ export function computeSignalScore(
       score,
       // Filled in below, once we know which groups survived.
       effectiveWeight: 0,
+      coverage,
       metrics,
       missingMetrics,
     };
   });
 
+  /*
+   * Each group's weight is scaled by its own coverage before the surviving
+   * groups are renormalized against each other.
+   *
+   * Without this, a group keeps its full share no matter how little of it
+   * ran, and the last surviving metric inherits the whole thing. That was
+   * not hypothetical: MVRV and exchange netflow have no free data source, so
+   * the on-chain group was funding alone — and funding, a metric the
+   * research doc gives ~11% of the score, was silently carrying 33%, more
+   * than RSI and Bollinger combined. Nobody chose that; renormalization did.
+   *
+   * Scaling by coverage says the honest thing instead: a group that only
+   * half ran only gets half its say, and the confidence it loses goes to the
+   * groups that actually have data. With full coverage every weight is
+   * exactly the configured one, so this changes nothing when all metrics
+   * are present.
+   */
   const available = groups.filter((g) => g.score !== null);
-  const groupWeightSum = available.reduce((sum, g) => {
-    const spec = config.groups.find((s) => s.id === g.id);
-    return sum + (spec?.weight ?? 0);
-  }, 0);
+  const weightFor = (group: GroupContribution): number => {
+    const spec = config.groups.find((s) => s.id === group.id);
+    return (spec?.weight ?? 0) * group.coverage;
+  };
+  const groupWeightSum = available.reduce((sum, g) => sum + weightFor(g), 0);
 
   for (const group of groups) {
     if (group.score === null || groupWeightSum === 0) continue;
-    const spec = config.groups.find((s) => s.id === group.id);
-    group.effectiveWeight = (spec?.weight ?? 0) / groupWeightSum;
+    group.effectiveWeight = weightFor(group) / groupWeightSum;
   }
 
   // No data at all is a genuinely neutral read, not a bearish one.
