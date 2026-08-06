@@ -37,7 +37,7 @@ export function useScoreAlerts(
       const label = token ? token.symbol : tokenId;
       const title = level === "strongBuy" ? `${label}: Compra Forte` : `${label}: Venda Forte`;
       new Notification(title, {
-        body: `Score ${signals.score.score} — ${signals.score.breakdown.join(", ")}`,
+        body: `Score ${Math.round(signals.score.score)} — ${signals.score.breakdown.join(", ")}`,
         tag: `score-${tokenId}`,
       });
     }

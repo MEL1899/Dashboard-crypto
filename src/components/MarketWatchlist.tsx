@@ -5,6 +5,8 @@ import type { MarketToken } from "../types";
 import type { Currency } from "../lib/currency";
 import type { TokenSignals } from "../hooks/useWatchlistSignals";
 import type { ScoreHistory } from "../lib/scoreHistory";
+import { computeSignalScore } from "../lib/score/signalScore";
+import { evaluateConfluence } from "../lib/score/confluence";
 import { Badge, Card, ScoreBadge, ScoreSparkline, formatMoney, formatPrice } from "./common";
 
 type SortKey = "price" | "change24h" | "marketCap" | "volume24h";
@@ -82,7 +84,11 @@ const FALLBACK_SIGNALS: TokenSignals = {
     "1w": NEUTRAL_TIMEFRAME_SIGNAL,
     "1M": NEUTRAL_TIMEFRAME_SIGNAL,
   },
-  score: { score: 50, level: "neutral", breakdown: [] },
+  // Built by the real functions on empty input rather than hand-written, so
+  // this placeholder can't drift out of shape as the result type grows.
+  score: computeSignalScore({}),
+  confluence: evaluateConfluence([]),
+  legacyScore: { score: 50, level: "neutral", breakdown: [] },
   isDemo: true,
 };
 

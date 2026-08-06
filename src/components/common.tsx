@@ -78,7 +78,11 @@ export function ScoreBadge({ level, score }: { level: ScoreLevel; score?: number
       meta.label
     ) : (
       <>
-        <span className="num-mono">{score}</span>
+        {/* Rounded here rather than in the score itself: the model keeps
+            full precision so threshold comparisons stay honest (a 59.6
+            must not become a "Compra"), while every badge shows a whole
+            number. */}
+        <span className="num-mono">{Math.round(score)}</span>
         <span className="mx-1 opacity-60">·</span>
         {meta.label}
       </>

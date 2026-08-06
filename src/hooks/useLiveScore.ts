@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchKlines, symbolForToken } from "../lib/binance";
+import { fetchFundingRateDailyPct, fetchKlines, symbolForToken } from "../lib/binance";
 import { fetchCandlesForTimeframe } from "../lib/coingecko";
 import { fetchFearGreedIndex } from "../lib/fearGreed";
 import { mockCandles } from "../lib/mock";
@@ -109,9 +109,15 @@ export function useLiveScore(tokenId: string | null, apiKey?: string): LiveScore
         fearGreed = null;
       }
 
+      // The one on-chain metric with a confirmed free source. MVRV and
+      // exchange netflow stay unwired, so the on-chain group runs on a
+      // single renormalized metric rather than the intended three.
+      const symbol = symbolForToken(id);
+      const fundingRate = symbol ? await fetchFundingRateDailyPct(symbol) : null;
+
       if (cancelled) return;
 
-      const inputs = buildScoreInputs(candles, { fearGreed });
+      const inputs = buildScoreInputs(candles, { fearGreed, fundingRate });
       const daily = candles["1d"] ?? [];
       const regime = detectRegime(daily, { maPeriod: 50 });
       const score = computeSignalScore(inputs, regime.regime);
@@ -134,9 +140,18 @@ export function useLiveScore(tokenId: string | null, apiKey?: string): LiveScore
             : "Indisponível — o grupo saiu do cálculo e os pesos foram redistribuídos",
         },
         {
-          label: "On-chain (MVRV, funding, netflow)",
+          label: "On-chain — Funding rate",
+          status: fundingRate !== null ? "live" : "unavailable",
+          detail:
+            fundingRate !== null
+              ? `Binance perpétuos em tempo real (${fundingRate >= 0 ? "+" : ""}${fundingRate.toFixed(4)}% ao dia)`
+              : "Sem perpétuo listado para este ativo, ou host de futuros indisponível",
+        },
+        {
+          label: "On-chain — MVRV e Exchange Netflow",
           status: "unavailable",
-          detail: "Ainda não conectado — nenhuma fonte gratuita de histórico definida",
+          detail:
+            "Ainda não conectados — sem fonte gratuita definida. O grupo on-chain roda só com o funding rate.",
         },
       ];
 

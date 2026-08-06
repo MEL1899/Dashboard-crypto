@@ -158,14 +158,33 @@ export function MarketOverview({
       >
         <div className="flex items-center gap-2">
           <div className="num-mono text-3xl font-semibold text-[var(--color-text)]">
-            {token && signals ? signals.score.score : "-"}
+            {token && signals ? Math.round(signals.score.score) : "-"}
           </div>
           {token && signals && <ScoreBadge level={signals.score.level} />}
+          {/* Confluence rides alongside the badge, never inside the number —
+              see lib/score/confluence.ts for why it stays a label. */}
+          {token && signals && signals.confluence.level !== "insufficient" && (
+            <span
+              className={clsx(
+                "inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium",
+                signals.confluence.level === "high"
+                  ? "bg-[var(--color-up)]/15 text-[var(--color-up)]"
+                  : "bg-white/5 text-[var(--color-text-dim)]",
+              )}
+            >
+              {signals.confluence.label}
+            </span>
+          )}
           {token && signals && <ScoreSparkline points={scoreHistory ?? []} width={64} height={20} />}
         </div>
         {token && signals && (
           <p className="mt-1 text-xs text-[var(--color-text-dim)]">
             {signals.score.breakdown.join(" · ")}
+            {signals.score.coverage < 1 && (
+              <span className="ml-1 opacity-70">
+                · cobertura {(signals.score.coverage * 100).toFixed(0)}%
+              </span>
+            )}
           </p>
         )}
 

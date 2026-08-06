@@ -90,6 +90,11 @@ export interface SignalScoreResult {
    * from all three, and the UI should be able to say so. */
   coverage: number;
   regime: MarketRegime;
+  /** One short phrase per group, for places with room for a line of text
+   * but not the full transparency panel — table subtitles, notification
+   * bodies. Derived from the groups rather than written separately, so it
+   * cannot describe a calculation that didn't happen. */
+  breakdown: string[];
 }
 
 /** Maps a 0-100 score onto the 5-level badge the UI already renders.
@@ -234,5 +239,8 @@ export function computeSignalScore(
     groups,
     coverage: configuredMetricCount > 0 ? suppliedMetricCount / configuredMetricCount : 0,
     regime,
+    breakdown: groups.map((group) =>
+      group.score === null ? `${group.label} sem dados` : `${group.label} ${group.score.toFixed(0)}`,
+    ),
   };
 }

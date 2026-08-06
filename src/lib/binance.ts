@@ -1,6 +1,10 @@
 import type { Candle, Timeframe } from "../types";
 
 const BASE = "https://api.binance.com";
+/** Perpetuals live on a separate host from spot. */
+const FUTURES_BASE = "https://fapi.binance.com";
+/** Funding settles every 8 hours. */
+const FUNDING_WINDOWS_PER_DAY = 3;
 
 export class BinanceDataError extends Error {}
 
@@ -98,6 +102,34 @@ interface Ticker24hRow {
   lastPrice: string;
   priceChangePercent: string;
   quoteVolume: string;
+}
+
+/**
+ * Perpetual funding rate, as a % PER DAY.
+ *
+ * The API reports the rate for a single 8-hour funding window, so it is
+ * multiplied by three to express a daily cost — which is the unit the
+ * score's clip range (+/-0.05%) is written in. Reporting the raw 8h figure
+ * against a daily range would understate crowding by a factor of three.
+ *
+ * Lives on the futures host, which is a different base URL from spot but
+ * equally public and key-free. Only tokens with a Binance mapping have a
+ * perpetual; everything else returns null and drops out of the score.
+ */
+export async function fetchFundingRateDailyPct(symbol: string): Promise<number | null> {
+  const url = new URL(`${FUTURES_BASE}/fapi/v1/premiumIndex`);
+  url.searchParams.set("symbol", symbol);
+
+  try {
+    const row = await getJson<{ lastFundingRate?: string }>(url);
+    const perWindow = Number(row.lastFundingRate);
+    if (!Number.isFinite(perWindow)) return null;
+    return perWindow * FUNDING_WINDOWS_PER_DAY * 100;
+  } catch {
+    // A token can be listed on spot without a perpetual, which is a 400
+    // here rather than an outage — not worth surfacing as an error.
+    return null;
+  }
 }
 
 /** Batched live ticker for however many symbols we need in one call. */

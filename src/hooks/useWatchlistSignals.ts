@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchKlines, symbolForToken } from "../lib/binance";
+import { fetchFundingRateDailyPct, fetchKlines, symbolForToken } from "../lib/binance";
 import { fetchCandlesForTimeframe } from "../lib/coingecko";
+import { fetchFearGreedIndex } from "../lib/fearGreed";
+import { buildScoreInputs, type CandlesByTimeframe } from "../lib/score/liveInputs";
+import { computeSignalScore, type SignalScoreResult } from "../lib/score/signalScore";
+import { evaluateConfluence, type ConfluenceResult } from "../lib/score/confluence";
 import {
   bbSignal,
   calcBollingerBands,
@@ -11,7 +15,7 @@ import {
   relativeStrengthSignal,
   trendSignal,
 } from "../lib/indicators";
-import { mockSignalsByTimeframe } from "../lib/mock";
+import { mockCandles, mockSignalsByTimeframe } from "../lib/mock";
 import {
   computeConfluenceScore,
   type BbPosition,
@@ -29,9 +33,23 @@ export interface TokenSignals {
    * inputs the confluence score below is built from, exposed so the UI can
    * show exactly what went into the number instead of just the result. */
   byTimeframe: Record<SignalTimeframe, TimeframeSignal>;
-  /** Multi-timeframe confluence score — identical wherever it's shown for
-   * this token, independent of whatever timeframe the chart has open. */
-  score: OpportunityScoreResult;
+  /**
+   * The layered score (lib/score) — what the watchlist badge now shows.
+   * Built from the same candles already fetched for `byTimeframe`, so
+   * adopting it costs no extra requests.
+   */
+  score: SignalScoreResult;
+  /** Which groups agree, shown as a label beside the score and never folded
+   * into it (see lib/score/confluence.ts). */
+  confluence: ConfluenceResult;
+  /**
+   * The previous inline score, kept alongside rather than deleted: the two
+   * disagree by design (this one blends 5 timeframes of enum-ised signals,
+   * the layered one reads raw values across 3 plus sentiment and funding),
+   * and until the new one is validated on real data there is value in being
+   * able to see both.
+   */
+  legacyScore: OpportunityScoreResult;
   /** true if at least one of the 3 timeframes fell back to mock data. */
   isDemo: boolean;
 }
@@ -74,12 +92,20 @@ async function fetchBtcCandlesByTimeframe(
   return out;
 }
 
+/** The enum-ised signal the legacy score needs, plus the raw candles the
+ * layered score needs — one fetch serving both, since re-requesting the
+ * same series per score would double the load on a rate-limited API. */
+interface TimeframeFetch {
+  signal: TimeframeSignal;
+  candles: Candle[];
+}
+
 async function fetchOneTimeframeSignal(
   tokenId: string,
   timeframe: SignalTimeframe,
   btcCandles: Candle[] | null,
   apiKey?: string,
-): Promise<TimeframeSignal | null> {
+): Promise<TimeframeFetch | null> {
   try {
     const symbol = symbolForToken(tokenId);
     const candles = symbol
@@ -93,40 +119,66 @@ async function fetchOneTimeframeSignal(
     const bbPosition: BbPosition = lastCandle && lastBb ? bbSignal(lastCandle.close, lastBb) : "inside";
     const macd: MacdSignal = macdSignal(calcMACD(candles));
     return {
-      rsi: Math.round(rsiSeries[rsiSeries.length - 1].value),
-      macd,
-      bbPosition,
-      volumeSpike: isVolumeSpike(candles),
-      trend: trendSignal(candles),
-      // BTC is the benchmark, not compared against itself.
-      relativeStrength:
-        tokenId === BTC_TOKEN_ID || !btcCandles
-          ? "inline"
-          : relativeStrengthSignal(candles, btcCandles),
+      signal: {
+        rsi: Math.round(rsiSeries[rsiSeries.length - 1].value),
+        macd,
+        bbPosition,
+        volumeSpike: isVolumeSpike(candles),
+        trend: trendSignal(candles),
+        // BTC is the benchmark, not compared against itself.
+        relativeStrength:
+          tokenId === BTC_TOKEN_ID || !btcCandles
+            ? "inline"
+            : relativeStrengthSignal(candles, btcCandles),
+      },
+      candles,
     };
   } catch {
     return null;
   }
 }
 
+interface ExternalReadings {
+  fearGreed: number | null;
+  fundingRate: number | null;
+}
+
 function buildTokenSignals(
   byTimeframe: Record<SignalTimeframe, TimeframeSignal>,
+  candles: CandlesByTimeframe,
+  external: ExternalReadings,
   isDemo: boolean,
 ): TokenSignals {
+  const score = computeSignalScore(buildScoreInputs(candles, external));
   return {
     byTimeframe,
-    score: computeConfluenceScore(byTimeframe),
+    score,
+    confluence: evaluateConfluence(score.groups),
+    legacyScore: computeConfluenceScore(byTimeframe),
     isDemo,
   };
 }
 
+/** Placeholder shown the instant a token joins the watchlist, before its
+ * real fetch lands — mock candles so the layered score has something
+ * shaped correctly to read, always flagged demo. */
 function mockTokenSignals(tokenId: string): TokenSignals {
-  return buildTokenSignals(mockSignalsByTimeframe(tokenId), true);
+  return buildTokenSignals(
+    mockSignalsByTimeframe(tokenId),
+    {
+      "1h": mockCandles(tokenId, "1h"),
+      "4h": mockCandles(tokenId, "4h"),
+      "1d": mockCandles(tokenId, "1d"),
+    },
+    { fearGreed: null, fundingRate: null },
+    true,
+  );
 }
 
 async function fetchTokenSignals(
   tokenId: string,
   btcCandlesByTf: Partial<Record<SignalTimeframe, Candle[]>>,
+  fearGreed: number | null,
   apiKey?: string,
 ): Promise<TokenSignals> {
   const fallback = mockSignalsByTimeframe(tokenId);
@@ -136,17 +188,24 @@ async function fetchTokenSignals(
 
   let isDemo = false;
   const byTimeframe = {} as Record<SignalTimeframe, TimeframeSignal>;
+  const candles: CandlesByTimeframe = {};
   TIMEFRAMES.forEach((tf, i) => {
     const result = results[i];
     if (result) {
-      byTimeframe[tf] = result;
+      byTimeframe[tf] = result.signal;
+      // Only the three the layered score reads; 1w/1M feed the legacy one.
+      if (tf === "1h" || tf === "4h" || tf === "1d") candles[tf] = result.candles;
     } else {
       byTimeframe[tf] = fallback[tf];
+      if (tf === "1h" || tf === "4h" || tf === "1d") candles[tf] = mockCandles(tokenId, tf);
       isDemo = true;
     }
   });
 
-  return buildTokenSignals(byTimeframe, isDemo);
+  const symbol = symbolForToken(tokenId);
+  const fundingRate = symbol ? await fetchFundingRateDailyPct(symbol) : null;
+
+  return buildTokenSignals(byTimeframe, candles, { fearGreed, fundingRate }, isDemo);
 }
 
 /**
@@ -188,8 +247,18 @@ export function useWatchlistSignals(ids: string[], apiKey?: string) {
       // Fetched once per refresh and reused for every token below, instead
       // of once per token, since it's the same BTC baseline for all of them.
       const btcCandlesByTf = await fetchBtcCandlesByTimeframe(apiKey);
+      // One market-wide reading shared by every token, rather than the same
+      // request repeated per row.
+      let fearGreed: number | null = null;
+      try {
+        fearGreed = (await fetchFearGreedIndex()).value;
+      } catch {
+        fearGreed = null;
+      }
       const entries = await Promise.all(
-        ids.map(async (id) => [id, await fetchTokenSignals(id, btcCandlesByTf, apiKey)] as const),
+        ids.map(
+          async (id) => [id, await fetchTokenSignals(id, btcCandlesByTf, fearGreed, apiKey)] as const,
+        ),
       );
       if (cancelled) return;
       setData((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
