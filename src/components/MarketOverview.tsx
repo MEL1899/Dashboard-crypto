@@ -8,6 +8,7 @@ import type { BbPosition, MacdSignal, SignalTimeframe } from "../lib/opportunity
 import type { TokenSignals } from "../hooks/useWatchlistSignals";
 import type { Currency } from "../lib/currency";
 import { Badge, Card, formatMoney, formatPrice, ScoreBadge, ScoreSparkline } from "./common";
+import { ScoreMethodologyPanel } from "./ScoreMethodologyPanel";
 import type { ScorePoint } from "../lib/scoreHistory";
 
 const TIMEFRAME_LABEL: Record<SignalTimeframe, string> = {
@@ -227,77 +228,12 @@ export function MarketOverview({
         )}
 
         {showExplainer && (
-          <div className="mt-3 space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 text-xs leading-relaxed text-[var(--color-text-dim)]">
-            <p>
-              O score combina os 5 timeframes do gráfico (1H, 4H, 1D, 1S e 1M) de cada
-              indicador, não só o que está aberto no gráfico — por isso o número é o mesmo aqui e
-              na tabela, independente do timeframe selecionado abaixo. Começa neutro em{" "}
-              <strong className="text-[var(--color-text)]">50</strong> e é ajustado por 5
-              indicadores técnicos — nenhum deles sozinho consegue levar o resultado a um
-              extremo, só a confluência entre eles:
-            </p>
-            <ul className="list-disc space-y-1.5 pl-4">
-              <li>
-                <strong className="text-[var(--color-text)]">
-                  RSI (Índice de Força Relativa, 14 períodos)
-                </strong>{" "}
-                — mede a velocidade e a força das variações recentes de preço, numa escala de 0
-                a 100. Abaixo de 30 é considerado sobrevendido (favorece compra); acima de 70,
-                sobrecomprado (favorece venda). Usamos a{" "}
-                <strong className="text-[var(--color-text)]">média entre os 5 timeframes</strong>
-                ; quanto mais distante de 50, maior o ajuste no score — mas esse ajuste vale só
-                40% quando vai contra a Tendência abaixo (ex.: RSI sobrevendido numa queda forte
-                conta menos, pra não confundir "pechincha" com "faca caindo").
-              </li>
-              <li>
-                <strong className="text-[var(--color-text)]">MACD (12/26/9)</strong> — compara
-                uma média móvel exponencial rápida (12 períodos) com uma lenta (26 períodos) e
-                uma linha de sinal (9 períodos) sobre essa diferença. Linha MACD cruzando acima
-                do sinal indica momentum de alta; abaixo, momentum de baixa. Usamos o sinal que
-                aparece na <strong className="text-[var(--color-text)]">maioria dos 5
-                timeframes</strong> (+15 pontos se em alta, −15 se em baixa).
-              </li>
-              <li>
-                <strong className="text-[var(--color-text)]">
-                  Bandas de Bollinger (20 períodos, 2 desvios-padrão)
-                </strong>{" "}
-                — uma média móvel com bandas de volatilidade acima e abaixo do preço. Preço
-                abaixo da banda inferior soma +15 pontos (possível sobrevenda); acima da banda
-                superior, −15 (possível sobrecompra) — também pela posição que aparece na maioria
-                dos 5 timeframes.
-              </li>
-              <li>
-                <strong className="text-[var(--color-text)]">Volume</strong> — quando o preço
-                toca uma das bandas de Bollinger (suporte ou resistência) com volume pelo menos
-                50% acima da média dos últimos 20 períodos na maioria dos 5 timeframes, isso é
-                tratado como confirmação do movimento: os +15/−15 da banda viram{" "}
-                <strong className="text-[var(--color-text)]">+18/−18</strong> — um ajuste pequeno
-                de propósito, já que esse é o sinal mais ruidoso dos 5 (um único limiar de volume
-                dispara fácil em moedas de menor liquidez).
-              </li>
-              <li>
-                <strong className="text-[var(--color-text)]">Tendência (SMA 20/50)</strong> —
-                compara o preço e a média de 20 períodos contra a média de 50: acima das duas é
-                tendência de alta (+10), abaixo das duas é tendência de baixa (−10). Serve de
-                contexto pros outros indicadores em vez de olhar o RSI/Bollinger isolados — é o
-                que reduz o ajuste do RSI quando ele vai contra a tendência.
-              </li>
-              <li>
-                <strong className="text-[var(--color-text)]">Força relativa vs. BTC</strong> —
-                compara a variação de preço do ativo com a do Bitcoin no mesmo período. Se o ativo
-                sobe ou cai bem mais que o BTC (diferença de 5 pontos percentuais ou mais), soma ou
-                subtrai 8 pontos — diferencia um ativo que está se destacando por conta própria de
-                um que só está seguindo o mercado.
-              </li>
-            </ul>
-            <p>
-              O resultado é limitado entre 0 e 100 e classificado em 5 faixas:{" "}
-              <strong className="text-[var(--color-text)]">Compra Forte</strong> (≥80),{" "}
-              <strong className="text-[var(--color-text)]">Compra</strong> (≥60),{" "}
-              <strong className="text-[var(--color-text)]">Neutro</strong> (≥40),{" "}
-              <strong className="text-[var(--color-text)]">Venda</strong> (≥20) e{" "}
-              <strong className="text-[var(--color-text)]">Venda Forte</strong> (abaixo de 20).
-            </p>
+          <div className="mt-3">
+            {/* Generated from the score's own config rather than written by
+                hand: the previous prose here described the older inline
+                formula and silently went stale the moment the layered score
+                took over this card. */}
+            <ScoreMethodologyPanel result={signals?.score} />
           </div>
         )}
       </Card>

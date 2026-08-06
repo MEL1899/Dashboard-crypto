@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, type ReactNode } from "react";
 import clsx from "clsx";
-import { BarChart2, History, LayoutDashboard, Moon, Settings, Sigma, Sun, Wallet, X } from "lucide-react";
+import { BarChart2, History, LayoutDashboard, Moon, Settings, Sun, Wallet, X } from "lucide-react";
 import { useMarketData } from "./hooks/useMarketData";
 import { useWatchlistTokens } from "./hooks/useWatchlistTokens";
 import { useWatchlistSignals } from "./hooks/useWatchlistSignals";
@@ -38,9 +38,6 @@ const WalletPanel = lazy(() =>
 const BacktestPanel = lazy(() =>
   import("./components/BacktestPanel").then((m) => ({ default: m.BacktestPanel })),
 );
-const LiveScorePanel = lazy(() =>
-  import("./components/LiveScorePanel").then((m) => ({ default: m.LiveScorePanel })),
-);
 const RiskGuidancePanel = lazy(() =>
   import("./components/RiskGuidancePanel").then((m) => ({ default: m.RiskGuidancePanel })),
 );
@@ -61,15 +58,12 @@ const TIMEFRAME_OPTIONS: { label: string; value: Timeframe }[] = [
   { label: "1M", value: "1M" },
 ];
 
-type Tab = "market" | "wallet" | "backtest" | "score";
+type Tab = "market" | "wallet" | "backtest";
 
 function App() {
   const [settings, setSettings] = useState(loadSettings());
   const { theme, toggleTheme } = useTheme();
   const [tab, setTab] = useState<Tab>("market");
-  // Which token the Score tab is reading. Kept here rather than inside the
-  // lazy panel so the choice survives tab switches.
-  const [scoreTokenId, setScoreTokenId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [watchlist, setWatchlist] = useState<string[]>(settings.watchlist);
   const [portfolio, setPortfolio] = useState<string[]>(settings.portfolio);
@@ -189,9 +183,6 @@ function App() {
             </TabButton>
             <TabButton active={tab === "backtest"} onClick={() => setTab("backtest")} icon={<History size={14} />}>
               Backtest
-            </TabButton>
-            <TabButton active={tab === "score"} onClick={() => setTab("score")} icon={<Sigma size={14} />}>
-              Score
             </TabButton>
           </nav>
 
@@ -362,6 +353,14 @@ function App() {
                 )}
               </>
             )}
+
+            {/* Layer 3 of the score lives here rather than behind the
+                "Como funciona?" toggle: the brief treats the retail-loss
+                disclaimer as product scope, and a disclaimer inside a
+                collapsed section is a disclaimer nobody reads. */}
+            <Suspense fallback={<TabFallback />}>
+              <RiskGuidancePanel currency={MERCADO_CURRENCY} />
+            </Suspense>
           </div>
         ) : tab === "wallet" ? (
           <Suspense fallback={<TabFallback />}>
@@ -375,32 +374,13 @@ function App() {
               onSubmit={handleWalletSubmit}
             />
           </Suspense>
-        ) : tab === "backtest" ? (
+        ) : (
           <Suspense fallback={<TabFallback />}>
             <BacktestPanel
               tokens={watchlistTokens.tokens}
               apiKey={settings.coingeckoApiKey || undefined}
               currency={MERCADO_CURRENCY}
             />
-          </Suspense>
-        ) : (
-          <Suspense fallback={<TabFallback />}>
-            <div className="flex flex-col gap-4">
-              <div className="rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-3 py-2 text-xs text-[var(--color-text)]">
-                O score em camadas roda com dado real de mercado e sentimento; o grupo on-chain
-                ainda não está conectado, então a cobertura fica abaixo de 100%. O selo da aba
-                Mercado continua sendo o score antigo até este ser validado.
-              </div>
-              <LiveScorePanel
-                tokens={watchlistTokens.tokens}
-                // Falls back to the first watchlist token so the tab shows a
-                // real reading immediately instead of an empty selector.
-                selectedTokenId={scoreTokenId ?? watchlistTokens.tokens[0]?.id ?? null}
-                onSelectToken={setScoreTokenId}
-                apiKey={settings.coingeckoApiKey || undefined}
-              />
-              <RiskGuidancePanel currency={MERCADO_CURRENCY} />
-            </div>
           </Suspense>
         )}
       </main>

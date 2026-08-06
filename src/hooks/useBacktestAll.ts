@@ -3,12 +3,24 @@ import { mockCandles } from "../lib/mock";
 import {
   runBacktest,
   runRandomBaseline,
+  runScoreBacktest,
   type BacktestMode,
   type BacktestResult,
   type BacktestTimeframe,
+  type ExternalSeriesInput,
 } from "../lib/backtest";
 import { BTC_TOKEN_ID, fetchBacktestCandles } from "../lib/backtestData";
+import { fetchFearGreedHistory } from "../lib/fearGreed";
 import type { Candle, MarketToken } from "../types";
+
+/**
+ * Which score the run is testing.
+ *
+ * "layered" is lib/score — the formula the app actually displays. "legacy"
+ * is the older inline score it replaced, kept selectable so the two can be
+ * compared on the same candles rather than argued about.
+ */
+export type ScoreEngine = "layered" | "legacy";
 
 export interface BacktestSummary {
   tokenId: string;
@@ -58,6 +70,7 @@ export function useBacktestAll() {
     mode: BacktestMode = "any",
     windowDays?: number,
     timeframe: BacktestTimeframe = "1d",
+    engine: ScoreEngine = "layered",
   ) {
     setState({ running: true, progress: { done: 0, total: tokens.length }, summaries: [] });
 
@@ -66,6 +79,19 @@ export function useBacktestAll() {
       btcCandles = await fetchBacktestCandles(BTC_TOKEN_ID, timeframe, apiKey, windowDays);
     } catch {
       btcCandles = mockCandles(BTC_TOKEN_ID, timeframe);
+    }
+
+    // Fetched once for the whole run and shared by every token — it is a
+    // market-wide series, not a per-asset one. Without it the layered
+    // score's sentiment group drops out and only the technical group is
+    // actually under test.
+    let external: ExternalSeriesInput = {};
+    if (engine === "layered") {
+      try {
+        external = { fearGreed: await fetchFearGreedHistory() };
+      } catch {
+        external = {};
+      }
     }
 
     const summaries: BacktestSummary[] = [];
@@ -79,8 +105,11 @@ export function useBacktestAll() {
         candles = mockCandles(token.id, timeframe);
         isDemo = true;
       }
-      const result = runBacktest(candles, token.id === BTC_TOKEN_ID ? null : btcCandles, mode, timeframe);
-      const baseline = baselineFor(result, candles, `${token.id}:${timeframe}:score`, timeframe);
+      const result =
+        engine === "layered"
+          ? runScoreBacktest(candles, { timeframe, mode, external })
+          : runBacktest(candles, token.id === BTC_TOKEN_ID ? null : btcCandles, mode, timeframe);
+      const baseline = baselineFor(result, candles, `${token.id}:${timeframe}:${engine}`, timeframe);
       summaries.push({ tokenId: token.id, symbol: token.symbol, result, baseline, isDemo });
       setState((s) => ({ ...s, progress: { done: summaries.length, total: tokens.length }, summaries: [...summaries] }));
     }
